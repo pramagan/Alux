@@ -29,7 +29,7 @@ const LAST_CHECKED_KEY = 'lastCheckedAt';
 // it flags something, so a doomscrolling session actually gets interrupted
 // instead of only being visible if the user happens to open the popup.
 const CHECK_ALARM_NAME = 'alux-periodic-check';
-const CHECK_INTERVAL_MINUTES = 2; // TODO: back to 20 after testing
+const CHECK_INTERVAL_MINUTES = 5;
 // The watch-history lookback window matches the check interval, so each
 // check only looks at activity since roughly the last one — otherwise the
 // same videos would get re-classified (and could re-alert) on every check
