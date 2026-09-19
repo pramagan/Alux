@@ -2,15 +2,35 @@
   "manifest_version": 3,
   "name": "Alux",
   "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAumyLhKNqwxLRNemS1k81vug9lwG/6riCLFtKIgdr9UcPEvRitWJxh/fZINz5Qf3S9paFW2yMG68W3WTm5/rxwsKkpjhiQuGKV9MTJ2jwcTStEgcI2UvP6sn0Gqd6x2OfEPrRmp7OkZFkrybc8nCClJEwrczDr46NTRXnxUS76GsVMfxjxDpMeYvBrtblL4DPpeXMB9/vT9MPuKGasSgdQvqqk4Zu0bA71vK2Ynjp0ZcTOdo6he4XUSBDNyeyp+umcnYYqzMCHcWct62deJ5XlKoxWPiNS8NxPnSPcPu34RV345DbalfLYSKMdVSoJDwCpVZxDKdujzXMDlNC0+pahwIDAQAB",
   "description": "A small, unseen spirit that watches over your browsing and guides you in the right direction — powered by ~typesafe/jev-latest via your own OpenRouter account. No backend, no shared API key — auth via OAuth PKCE.",
-  "permissions": ["identity", "storage", "history"],
-  "host_permissions": ["https://openrouter.ai/*"],
+  "permissions": ["identity", "storage", "history", "alarms", "notifications"],
+  "host_permissions": ["https://openrouter.ai/*", "*://*.youtube.com/*"],
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
+  "content_scripts": [
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["lib/content-pause.js"],
+      "run_at": "document_idle"
+    }
+  ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Alux"
+    "default_title": "Alux",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
   }
 }

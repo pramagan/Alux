@@ -28,6 +28,21 @@ h1 {
   color: #1a7f37;
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.strike-count {
+  font-size: 11px;
+  font-weight: 600;
+  color: #c0392b;
+  background: #fbe9e7;
+  border-radius: 10px;
+  padding: 2px 8px;
+}
+
 button {
   cursor: pointer;
   border: none;
@@ -69,7 +84,7 @@ h2 {
 }
 
 #instruction-input,
-#model-input {
+#voice-select {
   width: 100%;
   box-sizing: border-box;
   resize: none;
@@ -102,4 +117,11 @@ h2 {
   margin: 0 0 4px;
   line-height: 1.4;
   white-space: pre-wrap;
+}
+
+/* DEBUG ONLY — remove alongside #last-checked in popup.html/popup.js */
+.debug {
+  margin-top: 8px;
+  font-family: monospace;
+  color: #999;
 }
