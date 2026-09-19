@@ -14,6 +14,16 @@ Alux also remembers how you've responded to past notes. If you cut back before b
 
 Everything runs using your own OpenRouter account (connected once, up front) — there's no separate server involved, and nothing about your watch history is stored anywhere except on your own device.
 
+## How to install
+
+Alux isn't on the Chrome Web Store yet, so for now it's installed manually — this takes about a minute:
+
+1. Download this repository to your computer (green **Code** button on GitHub → **Download ZIP**, then unzip it — or `git clone` it if you're comfortable with that).
+2. Open `chrome://extensions` in Chrome.
+3. Turn on **Developer mode**, using the toggle in the top-right corner.
+4. Click **Load unpacked**, and select the folder you downloaded.
+5. The Alux icon will appear in your browser toolbar. Click it to get started — see "How to use" below.
+
 ## How to use
 
 1. **Click the Alux icon** in your browser toolbar and press **Connect OpenRouter account**. This opens OpenRouter's sign-in page — approve the request and you're connected.
@@ -56,12 +66,4 @@ lib/reflection.js      Pure logic: compares match-rate history to figure out how
 lib/content-pause.js   Content script injected into YouTube tabs; pauses <video> on request from background.js
 popup.html/.js/.css    Popup UI: connect button, watch-instruction + voice picker, disconnect button
 ```
-
-## Running it locally
-
-1. Open `chrome://extensions`.
-2. Enable **Developer mode** (top right).
-3. Click **Load unpacked** and select this project directory.
-4. Click the extension icon, then **Connect OpenRouter account** — this opens OpenRouter's authorization page in a popup window.
-5. Approve the request. You're returned to the extension, now connected and ready to set a watch instruction.
 
