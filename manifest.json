@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Jev Chat (OpenRouter)",
+  "version": "0.1.0",
+  "description": "Chat with ~typesafe/jev-latest via OpenRouter using your own account. No backend, no shared API key — auth via OAuth PKCE.",
+  "permissions": ["identity", "storage"],
+  "host_permissions": ["https://openrouter.ai/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Jev Chat"
+  }
+}
