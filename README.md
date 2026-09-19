@@ -2,7 +2,7 @@
 
 *A small, unseen spirit that watches over you and guides you in the right direction.*
 
-A Chrome extension (Manifest V3) that watches your YouTube watch history against an instruction you give it, using [`~typesafe/jev-latest`](https://openrouter.ai/~typesafe/jev-latest) on OpenRouter and **each user's own OpenRouter account** — no backend server, no shared API key baked into the extension.
+A Chrome extension (Manifest V3) that watches your YouTube watch history against an instruction you give it, using [`~typesafe/jev-latest`](https://openrouter.ai/~typesafe/jev-latest) (TypeSafe's "Jev" decision model) on OpenRouter and **each user's own OpenRouter account** — no backend server, no shared API key baked into the extension.
 
 ## Why there's no proxy server
 
@@ -20,7 +20,7 @@ Here, instead, each user brings their own OpenRouter account and pays for their 
 2. It opens `https://openrouter.ai/auth?...` via `chrome.identity.launchWebAuthFlow`, using the special `https://<extension-id>.chromiumapp.org/` redirect URI Chrome provides for exactly this purpose.
 3. OpenRouter redirects back with a one-time `code`.
 4. The extension exchanges `{ code, code_verifier }` for an API key by POSTing to `https://openrouter.ai/api/v1/auth/keys` (`lib/openrouter.js`).
-5. The resulting key is stored in `chrome.storage.local` (not `.sync`, so it doesn't propagate across the user's other synced Chrome profiles) and used as a normal `Authorization: Bearer` header for the chat-completions request in `checkYoutubeHistory()`.
+5. The resulting key is stored in `chrome.storage.local` (not `.sync`, so it doesn't propagate across the user's other synced Chrome profiles) and used as a normal `Authorization: Bearer` header for both OpenRouter requests `checkYoutubeHistory()` makes (see below).
 
 See OpenRouter's docs for the current parameter names: https://openrouter.ai/docs/use-cases/oauth-pkce
 
@@ -28,11 +28,11 @@ See OpenRouter's docs for the current parameter names: https://openrouter.ai/doc
 
 ```
 manifest.json       MV3 manifest — identity + storage + history permissions, openrouter.ai host permission
-background.js       Service worker: runs the OAuth flow, stores the key, handles watch requests
+background.js       Service worker: runs the OAuth flow, stores settings, runs the two-step check
 lib/pkce.js          PKCE code_verifier / code_challenge generation (Web Crypto)
-lib/openrouter.js    OpenRouter endpoint URLs + auth-exchange + chat-completions calls
-lib/watch.js          Reads chrome.history for YouTube watches, builds the prompt sent to jev-latest
-popup.html/.js/.css  Popup UI: connect button, watch-instruction box, disconnect button
+lib/openrouter.js    OpenRouter endpoint URLs — auth-exchange, chat-completions, and the decisions API
+lib/watch.js          Reads chrome.history for YouTube watches; builds the Jev question + the write-up prompt
+popup.html/.js/.css  Popup UI: connect button, watch-instruction + model boxes, disconnect button
 ```
 
 ## Running it locally
@@ -45,13 +45,23 @@ popup.html/.js/.css  Popup UI: connect button, watch-instruction box, disconnect
 
 ## Watching your YouTube history
 
-The popup is a free-text box where you tell Alux what to pay attention to in your own YouTube watch history — e.g. *"nudge me if I'm doomscrolling true-crime videos late at night"* or *"tell me if I've been avoiding the coding tutorials I said I'd get through"*.
+The popup has a free-text box where you tell Alux what to pay attention to in your own YouTube watch history — e.g. *"nudge me if I'm doomscrolling true-crime videos late at night"* or *"tell me if I've been avoiding the coding tutorials I said I'd get through"* — plus a second field for the model Alux should use to write its note (defaults to `openai/gpt-4o-mini`, editable any time).
 
-- **On-demand only.** Nothing runs in the background or on a timer. Clicking **Check now** is the only thing that triggers a read.
+### Why this is a two-step cascade, not one call
+
+`~typesafe/jev-latest` ("Jev") looked like a normal chat model from its OpenRouter listing, but it isn't one: it's TypeSafe's structured-decision model, served from **`POST https://openrouter.ai/api/alpha/decisions`**, not `/chat/completions`. You send it typed questions (`noul` = boolean-with-confidence, `choice`, or `score`) against a `state` object, and it returns typed answers — a confidence number, a chosen label, a score. There is **no free-text field anywhere in the response**. Calling it through `/chat/completions` (what an earlier version of this extension did) fails with a 400 telling you to use the decisions endpoint instead.
+
+So "Check now" runs two calls:
+
+1. **Jev decides if anything's worth mentioning.** `checkYoutubeHistory()` in `background.js` builds a request via `watch.buildJevDecisionRequest()` — your instruction and the recent watch titles go into `state`, and a single `should_flag` question (type `noul`) asks Jev whether the history matches what you described. This is fast and cheap (Jev is priced near-zero output cost) and runs on **every** click.
+2. **If Jev's confidence is ≥ `FLAG_THRESHOLD` (0.5, in `lib/watch.js`), a second call writes the actual note.** `watch.buildWriteupMessages()` builds a normal chat-completions prompt (same instruction + history) and sends it to whatever model is in the "model" field, via `openrouter.sendChatMessage()`. This step is skipped — no second API call, no extra cost — when Jev doesn't flag anything; the popup just shows a plain "nothing stood out" message instead.
+
+Other details:
+
+- **On-demand only.** Nothing runs in the background or on a timer. Clicking **Check now** is the only thing that triggers either call.
 - **What it reads.** `lib/watch.js` calls `chrome.history.search` (needs the `history` permission, added to `manifest.json`) scoped to the last 7 days, filters it down to `youtube.com/watch` URLs, de-dupes by video ID, and keeps the 50 most recent titles. This is the same watch history already recorded by the browser — no YouTube API calls, no separate OAuth grant for YouTube.
-- **What happens next.** Those titles plus your saved instruction get sent as one chat message to `~typesafe/jev-latest` via `openrouter.sendChatMessage`, asking Alux to reflect on the history *only insofar as it's relevant to your instruction* — not to summarize everything.
-- **Where it shows up.** The response and a "checked at" timestamp are saved to `chrome.storage.local` and rendered directly in the popup — no notifications, no badge. Reopen the popup any time to see the last result; it's replaced next time you click **Check now**.
-- **Cost note:** every click is one more request against your OpenRouter account.
+- **Where it shows up.** The resulting text, a "checked at" timestamp, and Jev's confidence score are saved to `chrome.storage.local` and rendered directly in the popup — no notifications, no badge. Reopen the popup any time to see the last result; it's replaced next time you click **Check now**.
+- **Cost note:** every click is a Jev call, plus a write-up call on top of that when something's flagged.
 
 ## Security notes / things to know before shipping this further
 

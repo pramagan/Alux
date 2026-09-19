@@ -5,7 +5,8 @@ const connectBtn = document.getElementById('connect-btn');
 const connectError = document.getElementById('connect-error');
 const disconnectBtn = document.getElementById('disconnect-btn');
 const instructionInput = document.getElementById('instruction-input');
-const saveInstructionBtn = document.getElementById('save-instruction-btn');
+const modelInput = document.getElementById('model-input');
+const saveSettingsBtn = document.getElementById('save-settings-btn');
 const checkHistoryBtn = document.getElementById('check-history-btn');
 const historyError = document.getElementById('history-error');
 const insightEl = document.getElementById('insight');
@@ -29,7 +30,8 @@ function renderInsight(insight) {
     return;
   }
   insightText.textContent = insight.text;
-  insightTime.textContent = `checked ${new Date(insight.at).toLocaleString()}`;
+  const confidencePct = Math.round((insight.confidence ?? 0) * 100);
+  insightTime.textContent = `checked ${new Date(insight.at).toLocaleString()} · Jev confidence ${confidencePct}%`;
   insightEl.hidden = false;
 }
 
@@ -40,8 +42,9 @@ async function refreshStatus() {
 }
 
 async function refreshWatchSettings() {
-  const { instruction, insight } = await send({ type: 'GET_WATCH_SETTINGS' });
+  const { instruction, writeupModel, insight } = await send({ type: 'GET_WATCH_SETTINGS' });
   instructionInput.value = instruction;
+  modelInput.value = writeupModel;
   renderInsight(insight);
 }
 
@@ -65,11 +68,11 @@ disconnectBtn.addEventListener('click', async () => {
   await refreshStatus();
 });
 
-saveInstructionBtn.addEventListener('click', async () => {
-  await send({ type: 'SET_WATCH_INSTRUCTION', instruction: instructionInput.value });
-  const original = saveInstructionBtn.textContent;
-  saveInstructionBtn.textContent = 'Saved';
-  setTimeout(() => { saveInstructionBtn.textContent = original; }, 1200);
+saveSettingsBtn.addEventListener('click', async () => {
+  await send({ type: 'SET_WATCH_SETTINGS', instruction: instructionInput.value, writeupModel: modelInput.value });
+  const original = saveSettingsBtn.textContent;
+  saveSettingsBtn.textContent = 'Saved';
+  setTimeout(() => { saveSettingsBtn.textContent = original; }, 1200);
 });
 
 checkHistoryBtn.addEventListener('click', async () => {
@@ -77,7 +80,7 @@ checkHistoryBtn.addEventListener('click', async () => {
   checkHistoryBtn.disabled = true;
   checkHistoryBtn.textContent = 'Watching…';
 
-  await send({ type: 'SET_WATCH_INSTRUCTION', instruction: instructionInput.value });
+  await send({ type: 'SET_WATCH_SETTINGS', instruction: instructionInput.value, writeupModel: modelInput.value });
   const result = await send({ type: 'CHECK_YOUTUBE_HISTORY' });
 
   checkHistoryBtn.disabled = false;

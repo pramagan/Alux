@@ -62,12 +62,14 @@ h2 {
 }
 
 .hint {
+  display: block;
   font-size: 11px;
   color: #666;
   margin: 0 0 6px;
 }
 
-#instruction-input {
+#instruction-input,
+#model-input {
   width: 100%;
   box-sizing: border-box;
   resize: none;
