@@ -27,11 +27,12 @@ See OpenRouter's docs for the current parameter names: https://openrouter.ai/doc
 ## Project layout
 
 ```
-manifest.json       MV3 manifest — identity + storage permissions, openrouter.ai host permission
-background.js       Service worker: runs the OAuth flow, stores the key, proxies chat requests
+manifest.json       MV3 manifest — identity + storage + history permissions, openrouter.ai host permission
+background.js       Service worker: runs the OAuth flow, stores the key, handles chat + watch requests
 lib/pkce.js          PKCE code_verifier / code_challenge generation (Web Crypto)
 lib/openrouter.js    OpenRouter endpoint URLs + auth-exchange + chat-completions calls
-popup.html/.js/.css  Popup UI: connect button, chat box, disconnect button
+lib/watch.js          Reads chrome.history for YouTube watches, builds the prompt sent to jev-latest
+popup.html/.js/.css  Popup UI: connect button, chat box, watch-instruction box, disconnect button
 ```
 
 ## Running it locally
@@ -42,9 +43,20 @@ popup.html/.js/.css  Popup UI: connect button, chat box, disconnect button
 4. Click the extension icon, then **Connect OpenRouter account** — this opens OpenRouter's authorization page in a popup window.
 5. Approve the request. You're returned to the extension, now connected, ready to chat.
 
+## Watching your YouTube history
+
+Below the chat box is a second feature: a free-text box where you tell Alux what to pay attention to in your own YouTube watch history — e.g. *"nudge me if I'm doomscrolling true-crime videos late at night"* or *"tell me if I've been avoiding the coding tutorials I said I'd get through"*.
+
+- **On-demand only.** Nothing runs in the background or on a timer. Clicking **Check now** is the only thing that triggers a read.
+- **What it reads.** `lib/watch.js` calls `chrome.history.search` (needs the `history` permission, added to `manifest.json`) scoped to the last 7 days, filters it down to `youtube.com/watch` URLs, de-dupes by video ID, and keeps the 50 most recent titles. This is the same watch history already recorded by the browser — no YouTube API calls, no separate OAuth grant for YouTube.
+- **What happens next.** Those titles plus your saved instruction get sent as one chat message to `~typesafe/jev-latest` via `openrouter.sendChatMessage` (the same call the regular chat box uses), asking Alux to reflect on the history *only insofar as it's relevant to your instruction* — not to summarize everything.
+- **Where it shows up.** The response and a "checked at" timestamp are saved to `chrome.storage.local` and rendered directly in the popup — no notifications, no badge. Reopen the popup any time to see the last result; it's replaced next time you click **Check now**.
+- **Cost note:** every click is one more request against your OpenRouter account, same as any chat message.
+
 ## Security notes / things to know before shipping this further
 
 - `chrome.storage.local` is not encrypted in any special way — it's readable by anything with access to the user's local Chrome profile, same ceiling as any client-only app. The mitigation here is that each stored key is a small-blast-radius, individually revocable, user-owned credential — not a shared secret you're responsible for rotating.
 - The `HTTP-Referer` / `X-Title` headers in `lib/openrouter.js` are for OpenRouter's app-attribution display only; they are not a security boundary. Update `HTTP-Referer` to point at your real extension listing/homepage before publishing.
 - Add a "Disconnect" flow for users who want to revoke access (done — see `popup.js`); also tell users in your store listing that they can revoke the key directly from their OpenRouter dashboard.
 - If you ever add a mode where *you* pay for usage (a shared/free tier), that's a materially different architecture: you'd need a real backend proxy holding your own key, plus per-user auth and rate limiting to keep it from being drained. Don't reuse this BYOK flow for that case.
+- The `history` permission is broad — Chrome will show users a warning that this extension can read their entire browsing history, even though `lib/watch.js` only ever queries for `youtube.com` and discards everything else client-side. Say so plainly in your store listing; users have no way to verify the filtering themselves.

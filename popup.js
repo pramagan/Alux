@@ -7,6 +7,13 @@ const disconnectBtn = document.getElementById('disconnect-btn');
 const chatForm = document.getElementById('chat-form');
 const chatInput = document.getElementById('chat-input');
 const messagesEl = document.getElementById('messages');
+const instructionInput = document.getElementById('instruction-input');
+const saveInstructionBtn = document.getElementById('save-instruction-btn');
+const checkHistoryBtn = document.getElementById('check-history-btn');
+const historyError = document.getElementById('history-error');
+const insightEl = document.getElementById('insight');
+const insightText = document.getElementById('insight-text');
+const insightTime = document.getElementById('insight-time');
 
 const history = [];
 
@@ -29,9 +36,26 @@ function appendMessage(role, content) {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
+function renderInsight(insight) {
+  if (!insight) {
+    insightEl.hidden = true;
+    return;
+  }
+  insightText.textContent = insight.text;
+  insightTime.textContent = `checked ${new Date(insight.at).toLocaleString()}`;
+  insightEl.hidden = false;
+}
+
 async function refreshStatus() {
   const { connected } = await send({ type: 'GET_STATUS' });
   renderStatus(connected);
+  if (connected) await refreshWatchSettings();
+}
+
+async function refreshWatchSettings() {
+  const { instruction, insight } = await send({ type: 'GET_WATCH_SETTINGS' });
+  instructionInput.value = instruction;
+  renderInsight(insight);
 }
 
 connectBtn.addEventListener('click', async () => {
@@ -54,6 +78,32 @@ disconnectBtn.addEventListener('click', async () => {
   history.length = 0;
   messagesEl.innerHTML = '';
   await refreshStatus();
+});
+
+saveInstructionBtn.addEventListener('click', async () => {
+  await send({ type: 'SET_WATCH_INSTRUCTION', instruction: instructionInput.value });
+  const original = saveInstructionBtn.textContent;
+  saveInstructionBtn.textContent = 'Saved';
+  setTimeout(() => { saveInstructionBtn.textContent = original; }, 1200);
+});
+
+checkHistoryBtn.addEventListener('click', async () => {
+  historyError.hidden = true;
+  checkHistoryBtn.disabled = true;
+  checkHistoryBtn.textContent = 'Watching…';
+
+  await send({ type: 'SET_WATCH_INSTRUCTION', instruction: instructionInput.value });
+  const result = await send({ type: 'CHECK_YOUTUBE_HISTORY' });
+
+  checkHistoryBtn.disabled = false;
+  checkHistoryBtn.textContent = 'Check now';
+
+  if (!result.ok) {
+    historyError.textContent = result.error;
+    historyError.hidden = false;
+    return;
+  }
+  renderInsight(result.insight);
 });
 
 chatForm.addEventListener('submit', async (event) => {

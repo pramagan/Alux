@@ -96,3 +96,55 @@ button:hover {
   font-family: inherit;
   font-size: 13px;
 }
+
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e5;
+  margin: 10px 0;
+}
+
+h2 {
+  font-size: 12px;
+  margin: 0 0 4px;
+}
+
+.hint {
+  font-size: 11px;
+  color: #666;
+  margin: 0 0 6px;
+}
+
+#instruction-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  padding: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.btn-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.btn-row button {
+  flex: 1;
+}
+
+.insight {
+  background: #f7f0e6;
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 6px;
+}
+
+.insight p {
+  margin: 0 0 4px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}

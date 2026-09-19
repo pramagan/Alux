@@ -23,6 +23,21 @@
         <textarea id="chat-input" rows="2" placeholder="Ask jev-latest…"></textarea>
         <button id="send-btn" type="submit">Send</button>
       </form>
+      <hr />
+
+      <h2>What should Alux watch for?</h2>
+      <p class="hint">Alux can look at your recent YouTube watch history and reflect on it against an instruction you give it. Nothing runs automatically — it only looks when you click "Check now".</p>
+      <textarea id="instruction-input" rows="2" placeholder="e.g. Gently nudge me if I'm doomscrolling true-crime videos late at night"></textarea>
+      <div class="btn-row">
+        <button id="save-instruction-btn" type="button">Save</button>
+        <button id="check-history-btn" type="button">Check now</button>
+      </div>
+      <p id="history-error" class="error" hidden></p>
+      <div id="insight" class="insight" hidden>
+        <p id="insight-text"></p>
+        <span id="insight-time" class="status"></span>
+      </div>
+
       <button id="disconnect-btn" class="link-btn" type="button">Disconnect</button>
     </section>
 

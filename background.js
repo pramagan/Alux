@@ -1,7 +1,10 @@
 import * as pkce from './lib/pkce.js';
 import * as openrouter from './lib/openrouter.js';
+import * as watch from './lib/watch.js';
 
 const STORAGE_KEY = 'openrouterKey';
+const INSTRUCTION_KEY = 'watchInstruction';
+const INSIGHT_KEY = 'lastInsight';
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   switch (message?.type) {
@@ -17,6 +20,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'CHAT':
       chat(message.messages)
         .then((reply) => sendResponse({ ok: true, reply }))
+        .catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+    case 'GET_WATCH_SETTINGS':
+      getWatchSettings().then(sendResponse);
+      return true;
+    case 'SET_WATCH_INSTRUCTION':
+      setWatchInstruction(message.instruction).then(sendResponse);
+      return true;
+    case 'CHECK_YOUTUBE_HISTORY':
+      checkYoutubeHistory()
+        .then((insight) => sendResponse({ ok: true, insight }))
         .catch((err) => sendResponse({ ok: false, error: err.message }));
       return true;
     default:
@@ -68,4 +82,40 @@ async function chat(messages) {
   const apiKey = stored[STORAGE_KEY];
   if (!apiKey) throw new Error('Not connected to OpenRouter yet.');
   return openrouter.sendChatMessage(apiKey, messages);
+}
+
+async function getWatchSettings() {
+  const stored = await chrome.storage.local.get([INSTRUCTION_KEY, INSIGHT_KEY]);
+  return {
+    instruction: stored[INSTRUCTION_KEY] || '',
+    insight: stored[INSIGHT_KEY] || null
+  };
+}
+
+async function setWatchInstruction(instruction) {
+  await chrome.storage.local.set({ [INSTRUCTION_KEY]: (instruction || '').trim() });
+  return { ok: true };
+}
+
+// Reads recent YouTube watch history (only when the user asks — see popup.js)
+// and asks jev-latest to reflect on it against the user's own instruction.
+async function checkYoutubeHistory() {
+  const stored = await chrome.storage.local.get([STORAGE_KEY, INSTRUCTION_KEY]);
+  const apiKey = stored[STORAGE_KEY];
+  if (!apiKey) throw new Error('Not connected to OpenRouter yet.');
+
+  const instruction = (stored[INSTRUCTION_KEY] || '').trim();
+  if (!instruction) throw new Error('Tell Alux what to watch for first.');
+
+  const entries = await watch.queryYoutubeHistory();
+  if (entries.length === 0) {
+    throw new Error('No recent YouTube watch history found in the browser.');
+  }
+
+  const messages = watch.buildWatchMessages(instruction, entries);
+  const text = await openrouter.sendChatMessage(apiKey, messages);
+
+  const insight = { text, at: Date.now() };
+  await chrome.storage.local.set({ [INSIGHT_KEY]: insight });
+  return insight;
 }
