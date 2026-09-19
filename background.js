@@ -2,6 +2,7 @@ import * as pkce from './lib/pkce.js';
 import * as openrouter from './lib/openrouter.js';
 import * as watch from './lib/watch.js';
 import * as reflection from './lib/reflection.js';
+import * as videoinfo from './lib/videoinfo.js';
 
 const STORAGE_KEY = 'openrouterKey';
 const INSTRUCTION_KEY = 'watchInstruction';
@@ -23,6 +24,10 @@ const STRIKE_COUNT_KEY = 'strikeCount';
 // (manual or periodic, regardless of outcome), so we can confirm the alarm is
 // actually firing on schedule. Remove the popup display of this once verified.
 const LAST_CHECKED_KEY = 'lastCheckedAt';
+// Cached { instruction, subject, trueCriteria, falseCriteria } from
+// watch.parseIntentResponse() — regenerated only when the instruction text
+// changes, so the LLM intent-extraction call doesn't run on every check.
+const INTENT_KEY = 'jevIntent';
 
 // Proactive path: alongside the manual "Check now" button, a recurring alarm
 // runs the same two-step cascade unattended and fires an OS notification when
@@ -282,27 +287,73 @@ async function getWatchSettings() {
 // writeupModel/ttsModel are plugin config, not user-facing — set directly in
 // chrome.storage.local (e.g. by an admin/dev tool), never through the popup UI.
 // ttsVoice is the one user-friendly knob, exposed via the popup's voice picker.
+//
+// Also eagerly extracts/caches the Jev intent (subject + criteria) for the
+// saved instruction right away, via getOrExtractIntent() below, instead of
+// waiting for the first check to need it — so by the time a check actually
+// runs, classification is ready to go immediately. If extraction fails here
+// (network hiccup, not connected yet) it's not fatal: the instruction still
+// saves, and checkYoutubeHistory() will retry extraction lazily on its own.
 async function setWatchSettings(instruction, ttsVoice) {
+  const trimmedInstruction = (instruction || '').trim();
   await chrome.storage.local.set({
-    [INSTRUCTION_KEY]: (instruction || '').trim(),
+    [INSTRUCTION_KEY]: trimmedInstruction,
     [TTS_VOICE_KEY]: (ttsVoice || '').trim()
   });
+
+  if (trimmedInstruction) {
+    const stored = await chrome.storage.local.get([STORAGE_KEY, WRITEUP_MODEL_KEY]);
+    const apiKey = stored[STORAGE_KEY];
+    if (apiKey) {
+      const writeupModel = (stored[WRITEUP_MODEL_KEY] || '').trim() || openrouter.DEFAULT_WRITEUP_MODEL;
+      try {
+        await getOrExtractIntent(apiKey, trimmedInstruction, writeupModel);
+      } catch (err) {
+        console.warn('Alux: intent extraction on save failed, will retry on next check:', err.message);
+      }
+    }
+  }
+
   return { ok: true };
+}
+
+// Reuses the cached intent if the instruction hasn't changed since it was
+// last extracted; otherwise calls the writeup model to derive a fresh one
+// (see watch.buildIntentExtractionMessages/parseIntentResponse) and caches it.
+async function getOrExtractIntent(apiKey, instruction, model) {
+  const stored = await chrome.storage.local.get(INTENT_KEY);
+  const cached = stored[INTENT_KEY];
+  if (cached && cached.instruction === instruction) return cached;
+
+  const raw = await openrouter.sendChatMessage(
+    apiKey,
+    watch.buildIntentExtractionMessages(instruction),
+    model,
+    { responseFormat: 'json_object' }
+  );
+  const intent = { instruction, ...watch.parseIntentResponse(raw, instruction) };
+  await chrome.storage.local.set({ [INTENT_KEY]: intent });
+  return intent;
 }
 
 // Cascade, run either by clicking "Check now" or by the periodic alarm (see
 // runPeriodicCheck above):
-// 1. Ask Jev (a cheap structured-decision model) whether the recent YouTube
-//    history matches the user's instruction closely enough to be worth
-//    mentioning, PLUS a per-video classification for each entry in the same
-//    call — see lib/watch.js buildJevDecisionRequest / classifyEntries.
-// 2. Compare this check's match rate against the message log to see how the
+// 0. Extract (or reuse a cached) intent from the user's free-text
+//    instruction — a content-category subject plus classification criteria
+//    — via a normal chat model, since Jev only answers pre-built typed
+//    questions. See getOrExtractIntent / lib/watch.js buildIntentExtractionMessages.
+// 1. Best-effort enrich each history entry with description/channel name
+//    (lib/videoinfo.js — unofficial page scrape, empty strings on failure),
+//    then ask Jev to classify each video individually against the extracted
+//    subject in one call — see lib/watch.js buildJevDecisionRequest / classifyEntries.
+// 2. Flagging is derived directly from the resulting match rate (no separate
+//    "is this worth mentioning" gate) against FLAG_THRESHOLD.
+// 3. Compare this check's match rate against the message log to see how the
 //    user reacted since the last note (lib/reflection.js) — did they cut
 //    back, ignore it, or cut back and then relapse?
-// 3. Only if confidence crosses FLAG_THRESHOLD, ask a normal chat model to
-//    write the actual note (tailored by that reaction), since Jev itself
-//    never returns prose.
-// 4. Persist the per-video classifications and this message to their logs,
+// 4. Only if flagged, ask a normal chat model to write the actual note
+//    (tailored by that reaction), since Jev itself never returns prose.
+// 5. Persist the per-video classifications and this message to their logs,
 //    so future checks have history to react to.
 async function checkYoutubeHistory() {
   // DEBUG ONLY — recorded before any early-return, so it reflects every
@@ -318,18 +369,21 @@ async function checkYoutubeHistory() {
 
   const writeupModel = (stored[WRITEUP_MODEL_KEY] || '').trim() || openrouter.DEFAULT_WRITEUP_MODEL;
 
-  const entries = await watch.queryYoutubeHistory(CHECK_INTERVAL_MS);
+  let entries = await watch.queryYoutubeHistory(CHECK_INTERVAL_MS);
   if (entries.length === 0) {
     throw new Error(`No YouTube watch history found in the last ${CHECK_INTERVAL_MINUTES} minutes.`);
   }
+  entries = await videoinfo.enrichEntriesWithPageInfo(entries);
 
-  const decisionRequest = watch.buildJevDecisionRequest(instruction, entries);
+  const intent = await getOrExtractIntent(apiKey, instruction, writeupModel);
+
+  const decisionRequest = watch.buildJevDecisionRequest(instruction, entries, intent);
   const answers = await openrouter.askJevDecision(apiKey, decisionRequest);
-  const confidence = answers?.should_flag?.noul ?? 0;
-  const flagged = confidence > watch.FLAG_THRESHOLD;
 
-  const classifications = watch.classifyEntries(entries, answers);
+  const classifications = watch.classifyEntries(entries, answers, intent.subject);
   const currentMatchRate = watch.matchRate(classifications);
+  const confidence = currentMatchRate;
+  const flagged = currentMatchRate > watch.FLAG_THRESHOLD;
 
   const { messageLog } = await getLogs();
   const { reaction, note: reactionNote } = reflection.describeReaction(messageLog, currentMatchRate);
@@ -339,7 +393,7 @@ async function checkYoutubeHistory() {
   if (flagged) {
     const raw = await openrouter.sendChatMessage(
       apiKey,
-      watch.buildWriteupMessages(instruction, entries, reactionNote),
+      watch.buildWriteupMessages(instruction, entries, reactionNote, intent),
       writeupModel,
       { responseFormat: 'json_object' }
     );
