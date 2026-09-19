@@ -31,7 +31,7 @@ async function connect() {
   const authUrl = openrouter.buildAuthUrl({
     callbackUrl: redirectUrl,
     codeChallenge,
-    keyLabel: 'Jev Chat Extension'
+    keyLabel: 'Alux'
   });
 
   return new Promise((resolve) => {

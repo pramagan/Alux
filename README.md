@@ -1,4 +1,6 @@
-# Jev Chat — OpenRouter Chrome Extension
+# Alux
+
+*A small, unseen spirit that watches over you and guides you in the right direction.*
 
 A Chrome extension (Manifest V3) that chats with [`~typesafe/jev-latest`](https://openrouter.ai/~typesafe/jev-latest) on OpenRouter, using **each user's own OpenRouter account** — no backend server, no shared API key baked into the extension.
 

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Jev Chat (OpenRouter)",
+  "name": "Alux",
   "version": "0.1.0",
-  "description": "Chat with ~typesafe/jev-latest via OpenRouter using your own account. No backend, no shared API key — auth via OAuth PKCE.",
+  "description": "A small, unseen spirit that watches over your browsing and guides you in the right direction — powered by ~typesafe/jev-latest via your own OpenRouter account. No backend, no shared API key — auth via OAuth PKCE.",
   "permissions": ["identity", "storage"],
   "host_permissions": ["https://openrouter.ai/*"],
   "background": {
@@ -11,6 +11,6 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Jev Chat"
+    "default_title": "Alux"
   }
 }
