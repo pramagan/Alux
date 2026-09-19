@@ -56,53 +56,6 @@ button:hover {
   font-size: 12px;
 }
 
-.messages {
-  max-height: 240px;
-  overflow-y: auto;
-  margin-bottom: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.msg {
-  padding: 6px 8px;
-  border-radius: 6px;
-  line-height: 1.4;
-  white-space: pre-wrap;
-}
-
-.msg.user {
-  background: #eef1f5;
-  align-self: flex-end;
-}
-
-.msg.assistant {
-  background: #f7f0e6;
-  align-self: flex-start;
-}
-
-#chat-form {
-  display: flex;
-  gap: 6px;
-}
-
-#chat-input {
-  flex: 1;
-  resize: none;
-  border-radius: 6px;
-  border: 1px solid #ccc;
-  padding: 6px;
-  font-family: inherit;
-  font-size: 13px;
-}
-
-hr {
-  border: none;
-  border-top: 1px solid #e5e5e5;
-  margin: 10px 0;
-}
-
 h2 {
   font-size: 12px;
   margin: 0 0 4px;

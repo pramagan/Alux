@@ -17,11 +17,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'GET_STATUS':
       getStatus().then(sendResponse);
       return true;
-    case 'CHAT':
-      chat(message.messages)
-        .then((reply) => sendResponse({ ok: true, reply }))
-        .catch((err) => sendResponse({ ok: false, error: err.message }));
-      return true;
     case 'GET_WATCH_SETTINGS':
       getWatchSettings().then(sendResponse);
       return true;
@@ -75,13 +70,6 @@ async function disconnect() {
 async function getStatus() {
   const stored = await chrome.storage.local.get(STORAGE_KEY);
   return { connected: Boolean(stored[STORAGE_KEY]) };
-}
-
-async function chat(messages) {
-  const stored = await chrome.storage.local.get(STORAGE_KEY);
-  const apiKey = stored[STORAGE_KEY];
-  if (!apiKey) throw new Error('Not connected to OpenRouter yet.');
-  return openrouter.sendChatMessage(apiKey, messages);
 }
 
 async function getWatchSettings() {
