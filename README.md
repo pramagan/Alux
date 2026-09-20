@@ -65,10 +65,9 @@ lib/videoinfo.js       Best-effort per-video description/channel enrichment (uno
 lib/reflection.js      Pure logic: compares match-rate history to figure out how the user reacted to past notes
 lib/content-pause.js   Content script injected into YouTube tabs; pauses <video> on request from background.js
 popup.html/.js/.css    Popup UI: connect button, watch-instruction + voice picker, disconnect button
-evals/                 Accuracy evals for Jev's video classification, against a hand-labeled dataset of real YouTube videos — see evals/README.md
 ```
 
 ## Evaluating classification accuracy
 
-`evals/` measures how accurately Jev classifies real videos against a given instruction, reusing the exact same production code (no reimplementation) against a small hand-labeled dataset. Run it with `OPENROUTER_API_KEY=sk-or-... npm run eval` — see `evals/README.md` for the dataset format and how to add cases.
+An `evals/` folder can measure how accurately Jev classifies real videos against a given instruction, reusing the exact same production code (`lib/watch.js`, `lib/videoinfo.js`, `lib/openrouter.js`) rather than reimplementing it. It's deliberately git-ignored and not part of this repository, since a useful dataset for this tends to involve real watch-history data — keep it local-only.
 
