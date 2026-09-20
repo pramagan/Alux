@@ -20,10 +20,18 @@ const MAX_MESSAGE_LOG = 50;
 // Lifetime count of flagged checks — unlike messageLog this is never trimmed,
 // so it stays accurate even after old log entries age out.
 const STRIKE_COUNT_KEY = 'strikeCount';
-// DEBUG ONLY — timestamp of the last time checkYoutubeHistory() ran at all
-// (manual or periodic, regardless of outcome), so we can confirm the alarm is
-// actually firing on schedule. Remove the popup display of this once verified.
+// Timestamp of the last time checkYoutubeHistory() ran at all (manual or
+// periodic, regardless of outcome). Originally added just to confirm the
+// alarm fires on schedule (the popup still shows it as "[debug]" — remove
+// that display once verified), but it's now also load-bearing: it anchors
+// the watch-history lookback window (see MAX_LOOKBACK_MS below), so it's no
+// longer purely a debug value.
 const LAST_CHECKED_KEY = 'lastCheckedAt';
+// A gap between checks (extension just loaded, Chrome was closed, the
+// service worker missed an alarm tick, etc.) shouldn't turn the next check
+// into an hours-long catch-up scan — cap how far back a single check will
+// ever look, regardless of how long it's actually been since the last one.
+const MAX_LOOKBACK_MS = 60 * 60 * 1000; // 1 hour
 // Cached { instruction, subject, trueCriteria, falseCriteria } from
 // watch.parseIntentResponse() — regenerated only when the instruction text
 // changes, so the LLM intent-extraction call doesn't run on every check.
@@ -35,10 +43,11 @@ const INTENT_KEY = 'jevIntent';
 // instead of only being visible if the user happens to open the popup.
 const CHECK_ALARM_NAME = 'alux-periodic-check';
 const CHECK_INTERVAL_MINUTES = 5;
-// The watch-history lookback window matches the check interval, so each
-// check only looks at activity since roughly the last one — otherwise the
-// same videos would get re-classified (and could re-alert) on every check
-// until they aged out of a fixed window.
+// Used as the alarm's schedule, and as the watch-history lookback window's
+// fallback for the very first check ever (before any previous check exists
+// to anchor to) — see checkYoutubeHistory()'s lookbackMs. Every check after
+// that looks back to the actual previous check instead of this fixed value,
+// so the same videos don't get re-classified (and re-alerted on) repeatedly.
 const CHECK_INTERVAL_MS = CHECK_INTERVAL_MINUTES * 60 * 1000;
 
 chrome.runtime.onInstalled.addListener(ensurePeriodicCheckAlarm);
@@ -356,9 +365,11 @@ async function getOrExtractIntent(apiKey, instruction, model) {
 // 5. Persist the per-video classifications and this message to their logs,
 //    so future checks have history to react to.
 async function checkYoutubeHistory() {
-  // DEBUG ONLY — recorded before any early-return, so it reflects every
-  // attempt (manual or periodic), not just successful ones.
-  await chrome.storage.local.set({ [LAST_CHECKED_KEY]: Date.now() });
+  const now = Date.now();
+  const { [LAST_CHECKED_KEY]: previousCheckedAt } = await chrome.storage.local.get(LAST_CHECKED_KEY);
+  // Recorded before any early-return, so it reflects every attempt (manual
+  // or periodic), not just successful ones.
+  await chrome.storage.local.set({ [LAST_CHECKED_KEY]: now });
 
   const stored = await chrome.storage.local.get([STORAGE_KEY, INSTRUCTION_KEY, WRITEUP_MODEL_KEY]);
   const apiKey = stored[STORAGE_KEY];
@@ -369,9 +380,23 @@ async function checkYoutubeHistory() {
 
   const writeupModel = (stored[WRITEUP_MODEL_KEY] || '').trim() || openrouter.DEFAULT_WRITEUP_MODEL;
 
-  let entries = await watch.queryYoutubeHistory(CHECK_INTERVAL_MS);
+  // Look back over watch history since the last time a check actually ran,
+  // not a fixed clock-time window — a rigid "now minus CHECK_INTERVAL_MS"
+  // window has no real relationship to when the user actually last watched
+  // something, which is exactly what makes the very first check after
+  // loading the extension (no previous check to anchor to yet) confusing:
+  // the window and "what was last watched" can land nowhere near each other.
+  // Falls back to CHECK_INTERVAL_MS only for that first-ever check, and is
+  // capped at MAX_LOOKBACK_MS so a long gap between checks (Chrome closed,
+  // a missed alarm tick) doesn't turn into an hours-long catch-up scan.
+  const lookbackMs = previousCheckedAt
+    ? Math.min(now - previousCheckedAt, MAX_LOOKBACK_MS)
+    : CHECK_INTERVAL_MS;
+
+  let entries = await watch.queryYoutubeHistory(lookbackMs);
   if (entries.length === 0) {
-    throw new Error(`No YouTube watch history found in the last ${CHECK_INTERVAL_MINUTES} minutes.`);
+    const lookbackMinutes = Math.round(lookbackMs / 60_000);
+    throw new Error(`No YouTube watch history found in the last ${lookbackMinutes} minutes.`);
   }
   entries = await videoinfo.enrichEntriesWithPageInfo(entries);
 
