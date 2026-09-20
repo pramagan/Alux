@@ -27,11 +27,8 @@ function renderStatus(connected) {
 }
 
 function renderStrikeCount(strikeCount) {
-  if (!strikeCount) {
-    strikeCountEl.hidden = true;
-    return;
-  }
-  strikeCountEl.textContent = `🔥 ${strikeCount} strike${strikeCount === 1 ? '' : 's'}`;
+  const count = strikeCount || 0;
+  strikeCountEl.textContent = `🔥 ${count} strike${count === 1 ? '' : 's'}`;
   strikeCountEl.hidden = false;
 }
 
