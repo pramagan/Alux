@@ -4,6 +4,8 @@
   "type": "module",
   "description": "Alux is a Chrome extension (see manifest.json) — this package.json exists only so Node can run evals/run.js and import lib/*.js as ES modules. It has no effect on the extension itself.",
   "scripts": {
-    "eval": "node evals/run.js"
+    "eval": "node evals/run.js",
+    "eval:parse-history": "node evals/parse-history.js",
+    "eval:classify": "node evals/classify-and-report.js"
   }
 }
