@@ -106,8 +106,13 @@ function renderInsight(insight, { autoSpeak = false } = {}) {
     return;
   }
   insightText.textContent = insight.text;
-  const confidencePct = Math.round((insight.confidence ?? 0) * 100);
-  insightTime.textContent = `checked ${new Date(insight.at).toLocaleString()} · Jev confidence ${confidencePct}%`;
+  const checkedAt = `checked ${new Date(insight.at).toLocaleString()}`;
+  if (insight.flagged) {
+    const confidencePct = Math.round((insight.confidence ?? 0) * 100);
+    insightTime.textContent = `${checkedAt} · Jev confidence ${confidencePct}%`;
+  } else {
+    insightTime.textContent = checkedAt;
+  }
   insightEl.hidden = false;
   speakBtn.hidden = false;
 
