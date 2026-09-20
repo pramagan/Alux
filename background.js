@@ -351,7 +351,8 @@ async function checkYoutubeHistory() {
     STORAGE_KEY,
     INSTRUCTION_KEY,
     WRITEUP_MODEL_KEY,
-    LAST_PROCESSED_VISIT_KEY
+    LAST_PROCESSED_VISIT_KEY,
+    INSIGHT_KEY
   ]);
   const apiKey = stored[STORAGE_KEY];
   if (!apiKey) throw new Error('Not connected to OpenRouter yet.');
@@ -369,7 +370,21 @@ async function checkYoutubeHistory() {
 
   let entries = await watch.queryYoutubeHistory(CHECK_INTERVAL_MS, sinceTimestamp);
   if (entries.length === 0) {
-    throw new Error('No new YouTube watch history since your last check.');
+    // Nothing new to classify — re-surface whatever was last computed rather
+    // than erroring, so "Check now" (and the periodic alarm) keep showing
+    // something meaningful instead of a dead-end message. This also means a
+    // previously-flagged insight that never got delivered (e.g. the user
+    // wasn't on YouTube at the time) keeps getting another chance to surface.
+    if (stored[INSIGHT_KEY]) return stored[INSIGHT_KEY];
+    return {
+      text: "Alux hasn't seen any new YouTube watches to check yet.",
+      searchQuery: null,
+      at: Date.now(),
+      flagged: false,
+      confidence: 0,
+      matchRate: 0,
+      reaction: null
+    };
   }
   entries = await videoinfo.enrichEntriesWithPageInfo(entries);
 
