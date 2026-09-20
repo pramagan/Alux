@@ -14,7 +14,6 @@ const insightText = document.getElementById('insight-text');
 const insightTime = document.getElementById('insight-time');
 const speakBtn = document.getElementById('speak-btn');
 const strikeCountEl = document.getElementById('strike-count');
-const lastCheckedEl = document.getElementById('last-checked'); // DEBUG ONLY
 
 function send(message) {
   return chrome.runtime.sendMessage(message);
@@ -34,14 +33,6 @@ function renderStrikeCount(strikeCount) {
   }
   strikeCountEl.textContent = `🔥 ${strikeCount} strike${strikeCount === 1 ? '' : 's'}`;
   strikeCountEl.hidden = false;
-}
-
-// DEBUG ONLY — confirms the periodic alarm is actually firing on schedule.
-// Remove this function, its call sites, and #last-checked once verified.
-function renderLastChecked(lastCheckedAt) {
-  lastCheckedEl.textContent = lastCheckedAt
-    ? `[debug] last checked: ${new Date(lastCheckedAt).toLocaleTimeString()}`
-    : '[debug] last checked: never';
 }
 
 // Resolves once playback actually finishes (or errors out) — needed so
@@ -134,12 +125,11 @@ async function refreshStatus() {
 }
 
 async function refreshWatchSettings() {
-  const { instruction, ttsVoice, insight, strikeCount, lastCheckedAt } = await send({ type: 'GET_WATCH_SETTINGS' });
+  const { instruction, ttsVoice, insight, strikeCount } = await send({ type: 'GET_WATCH_SETTINGS' });
   instructionInput.value = instruction;
   voiceSelect.value = ttsVoice;
   renderInsight(insight);
   renderStrikeCount(strikeCount);
-  renderLastChecked(lastCheckedAt); // DEBUG ONLY
 }
 
 connectBtn.addEventListener('click', async () => {
@@ -179,11 +169,6 @@ checkHistoryBtn.addEventListener('click', async () => {
 
   checkHistoryBtn.disabled = false;
   checkHistoryBtn.textContent = 'Check now';
-
-  // DEBUG ONLY — checkYoutubeHistory() records lastCheckedAt even on failure,
-  // so refresh it regardless of whether this check succeeded.
-  const { lastCheckedAt } = await send({ type: 'GET_WATCH_SETTINGS' });
-  renderLastChecked(lastCheckedAt);
 
   if (!result.ok) {
     historyError.textContent = result.error;

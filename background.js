@@ -277,19 +277,12 @@ async function getStatus() {
 }
 
 async function getWatchSettings() {
-  const stored = await chrome.storage.local.get([
-    INSTRUCTION_KEY,
-    TTS_VOICE_KEY,
-    INSIGHT_KEY,
-    STRIKE_COUNT_KEY,
-    LAST_CHECKED_KEY
-  ]);
+  const stored = await chrome.storage.local.get([INSTRUCTION_KEY, TTS_VOICE_KEY, INSIGHT_KEY, STRIKE_COUNT_KEY]);
   return {
     instruction: stored[INSTRUCTION_KEY] || '',
     ttsVoice: stored[TTS_VOICE_KEY] || openrouter.DEFAULT_TTS_VOICE,
     insight: stored[INSIGHT_KEY] || null,
-    strikeCount: stored[STRIKE_COUNT_KEY] || 0,
-    lastCheckedAt: stored[LAST_CHECKED_KEY] || null // DEBUG ONLY
+    strikeCount: stored[STRIKE_COUNT_KEY] || 0
   };
 }
 

@@ -118,10 +118,3 @@ h2 {
   line-height: 1.4;
   white-space: pre-wrap;
 }
-
-/* DEBUG ONLY — remove alongside #last-checked in popup.html/popup.js */
-.debug {
-  margin-top: 8px;
-  font-family: monospace;
-  color: #999;
-}
