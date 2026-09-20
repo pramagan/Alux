@@ -36,9 +36,9 @@ const LAST_PROCESSED_VISIT_KEY = 'lastProcessedVisitTime';
 // an hours-long catch-up scan — cap how far back a single check will ever
 // look, regardless of how stale the cursor is.
 const MAX_LOOKBACK_MS = 60 * 60 * 1000; // 1 hour
-// Cached { instruction, subject, trueCriteria, falseCriteria } from
-// watch.parseIntentResponse() — regenerated only when the instruction text
-// changes, so the LLM intent-extraction call doesn't run on every check.
+// Cached { instruction, question } from watch.parseIntentResponse() —
+// regenerated only when the instruction text changes, so the LLM
+// intent-extraction call doesn't run on every check.
 const INTENT_KEY = 'jevIntent';
 
 // Proactive path: alongside the manual "Check now" button, a recurring alarm
@@ -330,12 +330,7 @@ async function getOrExtractIntent(apiKey, instruction, model) {
   const cached = stored[INTENT_KEY];
   if (cached && cached.instruction === instruction) return cached;
 
-  const raw = await openrouter.sendChatMessage(
-    apiKey,
-    watch.buildIntentExtractionMessages(instruction),
-    model,
-    { responseFormat: 'json_object' }
-  );
+  const raw = await openrouter.sendChatMessage(apiKey, watch.buildIntentExtractionMessages(instruction), model);
   const intent = { instruction, ...watch.parseIntentResponse(raw, instruction) };
   await chrome.storage.local.set({ [INTENT_KEY]: intent });
   return intent;
@@ -344,13 +339,13 @@ async function getOrExtractIntent(apiKey, instruction, model) {
 // Cascade, run either by clicking "Check now" or by the periodic alarm (see
 // runPeriodicCheck above):
 // 0. Extract (or reuse a cached) intent from the user's free-text
-//    instruction — a content-category subject plus classification criteria
-//    — via a normal chat model, since Jev only answers pre-built typed
-//    questions. See getOrExtractIntent / lib/watch.js buildIntentExtractionMessages.
+//    instruction — a single precise TRUE/FALSE question describing the
+//    content — via a normal chat model, since Jev only answers pre-built
+//    typed questions. See getOrExtractIntent / lib/watch.js buildIntentExtractionMessages.
 // 1. Best-effort enrich each history entry with description/channel name
 //    (lib/videoinfo.js — unofficial page scrape, empty strings on failure),
-//    then ask Jev to classify each video individually against the extracted
-//    subject in one call — see lib/watch.js buildJevDecisionRequest / classifyEntries.
+//    then ask Jev to answer that question individually for each video in one
+//    call — see lib/watch.js buildJevDecisionRequest / classifyEntries.
 // 2. Flagging is derived directly from the resulting match rate (no separate
 //    "is this worth mentioning" gate) against FLAG_THRESHOLD.
 // 3. Compare this check's match rate against the message log to see how the
@@ -391,10 +386,10 @@ async function checkYoutubeHistory() {
 
   const intent = await getOrExtractIntent(apiKey, instruction, writeupModel);
 
-  const decisionRequest = watch.buildJevDecisionRequest(instruction, entries, intent);
+  const decisionRequest = watch.buildJevDecisionRequest(entries, intent);
   const answers = await openrouter.askJevDecision(apiKey, decisionRequest);
 
-  const classifications = watch.classifyEntries(entries, answers, intent.subject);
+  const classifications = watch.classifyEntries(entries, answers);
   const currentMatchRate = watch.matchRate(classifications);
   const confidence = currentMatchRate;
   const flagged = currentMatchRate > watch.FLAG_THRESHOLD;
