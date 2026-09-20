@@ -21,21 +21,13 @@ const MAX_MESSAGE_LOG = 50;
 // so it stays accurate even after old log entries age out.
 const STRIKE_COUNT_KEY = 'strikeCount';
 // A cursor into watch history: the lastVisitTime of the newest video already
-// considered by a completed check. queryYoutubeHistory() only ever returns
-// videos strictly after this point, so a video is never reclassified (or
-// re-alerted on) — and unlike a clock-time window ("look back N minutes"),
-// this doesn't care how much real time has passed since it last advanced, so
-// there's no confusing mismatch between "when did we last check" and "when
-// did the user actually last watch something." Only advances once a check
-// completes successfully (see the end of checkYoutubeHistory()), so a
-// transient failure mid-check gets retried from the same point next time
-// rather than silently skipping those videos forever.
+// considered by a completed check. queryYoutubeHistory() never re-includes
+// videos at or before this point, so a video is never reclassified (or
+// re-alerted on). Only advances once a check completes successfully (see the
+// end of checkYoutubeHistory()), so a transient failure mid-check gets
+// retried from the same point next time rather than silently skipping those
+// videos forever.
 const LAST_PROCESSED_VISIT_KEY = 'lastProcessedVisitTime';
-// A gap since the cursor last advanced (extension just installed, Chrome was
-// closed for a while, a missed alarm tick) shouldn't turn the next check into
-// an hours-long catch-up scan — cap how far back a single check will ever
-// look, regardless of how stale the cursor is.
-const MAX_LOOKBACK_MS = 60 * 60 * 1000; // 1 hour
 // Cached { instruction, question } from watch.parseIntentResponse() —
 // regenerated only when the instruction text changes, so the LLM
 // intent-extraction call doesn't run on every check.
@@ -47,10 +39,9 @@ const INTENT_KEY = 'jevIntent';
 // instead of only being visible if the user happens to open the popup.
 const CHECK_ALARM_NAME = 'alux-periodic-check';
 const CHECK_INTERVAL_MINUTES = 5;
-// Used as the alarm's schedule, and as the watch-history cursor's fallback
-// for the very first check ever (before LAST_PROCESSED_VISIT_KEY exists) —
-// see checkYoutubeHistory()'s sinceTimestamp. Every check after that uses the
-// actual cursor instead of this fixed value.
+// Used as the alarm's schedule, and as the width of the watch-history window
+// itself — see checkYoutubeHistory()'s call to queryYoutubeHistory(), which
+// windows around the last video actually watched, not around Date.now().
 const CHECK_INTERVAL_MS = CHECK_INTERVAL_MINUTES * 60 * 1000;
 
 chrome.runtime.onInstalled.addListener(ensurePeriodicCheckAlarm);
@@ -370,15 +361,13 @@ async function checkYoutubeHistory() {
 
   const writeupModel = (stored[WRITEUP_MODEL_KEY] || '').trim() || openrouter.DEFAULT_WRITEUP_MODEL;
 
-  // sinceTimestamp is a cursor into watch history, not a clock-time window —
-  // see LAST_PROCESSED_VISIT_KEY. Falls back to CHECK_INTERVAL_MS ago for the
-  // very first check ever (no cursor yet), and is never allowed to reach
-  // further back than MAX_LOOKBACK_MS even if the cursor is very stale.
-  const now = Date.now();
-  const previousCursor = stored[LAST_PROCESSED_VISIT_KEY] || now - CHECK_INTERVAL_MS;
-  const sinceTimestamp = Math.max(previousCursor, now - MAX_LOOKBACK_MS);
+  // Window is anchored to the last video actually watched, not to Date.now()
+  // — see queryYoutubeHistory()'s doc comment. sinceTimestamp here is purely
+  // the "don't reprocess" cursor (0 for the very first check ever), not a
+  // lookback duration.
+  const sinceTimestamp = stored[LAST_PROCESSED_VISIT_KEY] || 0;
 
-  let entries = await watch.queryYoutubeHistory(sinceTimestamp);
+  let entries = await watch.queryYoutubeHistory(CHECK_INTERVAL_MS, sinceTimestamp);
   if (entries.length === 0) {
     throw new Error('No new YouTube watch history since your last check.');
   }
