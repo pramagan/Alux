@@ -4,11 +4,13 @@
 
 A Chrome extension (Manifest V3) that watches your YouTube watch history against an instruction you give it, using [`~typesafe/jev-latest`](https://openrouter.ai/~typesafe/jev-latest) (TypeSafe's "Jev" decision model) on OpenRouter and **each user's own OpenRouter account** — no backend server, no shared API key baked into the extension.
 
+![Alux popup UI](Alux-UI.png)
+
 ## How it works
 
-You tell Alux, in your own words, what kind of doomscrolling you want it to watch out for — like "true-crime videos late at night" or "food videos." Alux quietly figures out what content category you mean, then checks in on your recent YouTube watching every few minutes.
+You tell Alux, in your own words, what kind of doomscrolling you want it to watch out for — like "true-crime videos late at night" or "food videos." Alux quietly figures out what content category you mean, then checks in on your recent YouTube watching every hour (or any time you press **Check now**).
 
-If it notices you've been mostly watching that kind of content, it steps in: it pauses the video, gently speaks a short note out loud, suggests something completely different worth watching instead, and takes you straight to a search for that suggestion — all without you needing to do anything.
+If it notices you've been mostly watching that kind of content, it steps in: it pauses the video and gently speaks a short note out loud, suggesting something completely different worth watching instead — with a link you can click to jump straight to a search for that suggestion whenever you're ready.
 
 Alux also remembers how you've responded to past notes. If you cut back before but slipped back into it, it'll be encouraging rather than scolding. If a nudge hasn't worked at all, it'll be a bit more direct next time. And it keeps a running count of how many times it's caught you, shown right in the popup.
 
@@ -27,11 +29,10 @@ Alux isn't on the Chrome Web Store yet, so for now it's installed manually — t
 ## How to use
 
 1. **Click the Alux icon** in your browser toolbar and press **Connect OpenRouter account**. This opens OpenRouter's sign-in page — approve the request and you're connected.
-2. **Tell Alux what to watch for.** Type an instruction in your own words, like *"nudge me if I'm doomscrolling food videos"* or *"tell me if I keep avoiding the coding tutorials I said I'd watch."*
-3. **Pick a voice** for how the note gets read aloud, and click **Save**.
-4. That's it. Alux checks your recent YouTube activity automatically in the background every few minutes — you don't need to keep the popup open. You can also press **Check now** any time to check immediately.
-5. **When something's flagged**, Alux will pause what's playing, speak a short note, and open a YouTube search for something better to watch instead. You'll also see the note (and a 🔊 Replay button) if you open the popup.
-6. Press **Disconnect** in the popup any time to stop Alux and remove your saved connection — you can also revoke access directly from your OpenRouter account dashboard.
+2. **Tell Alux what to watch for.** Type an instruction in your own words, like *"nudge me if I'm doomscrolling food videos"* or *"tell me if I keep avoiding the coding tutorials I said I'd watch,"* and click **Save**.
+3. That's it. Alux checks your recent YouTube activity automatically in the background every hour — you don't need to keep the popup open. You can also press **Check now** any time to check immediately.
+4. **When something's flagged**, Alux will pause what's playing and speak a short note out loud, with a link to a YouTube search for something better to watch instead — you decide whether to click it. You'll also see the note (with a 🔍 link and a 🔊 Replay button) if you open the popup, and it stays there for reference. The note is always read aloud in the same voice.
+5. Press **Disconnect** in the popup any time to stop Alux and remove your saved connection — you can also revoke access directly from your OpenRouter account dashboard.
 
 ## Why there's no proxy server
 
@@ -64,7 +65,7 @@ lib/watch.js           Reads chrome.history for YouTube watches; builds the Jev 
 lib/videoinfo.js       Best-effort per-video description/channel enrichment (unofficial watch-page fetch, no API key)
 lib/reflection.js      Pure logic: compares match-rate history to figure out how the user reacted to past notes
 lib/content-pause.js   Content script injected into YouTube tabs; pauses <video> on request from background.js
-popup.html/.js/.css    Popup UI: connect button, watch-instruction + voice picker, disconnect button
+popup.html/.js/.css    Popup UI: connect button, watch-instruction, disconnect button
 ```
 
 ## Evaluating classification accuracy
