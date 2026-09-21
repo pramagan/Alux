@@ -7,6 +7,7 @@
   "scripts": {
     "eval": "node evals/run.js",
     "eval:parse-history": "node evals/parse-history.js",
-    "eval:classify": "node evals/classify-and-report.js"
+    "eval:classify": "node evals/classify-and-report.js",
+    "eval:summarize": "node evals/summarize.js"
   }
 }

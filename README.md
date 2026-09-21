@@ -70,7 +70,7 @@ popup.html/.js/.css    Popup UI: connect button, watch-instruction, disconnect b
 
 ## Evaluating classification accuracy
 
-An `evals/` folder can measure how accurately Jev classifies real videos against a given instruction, reusing the exact same production code (`lib/watch.js`, `lib/videoinfo.js`, `lib/openrouter.js`) rather than reimplementing it. It's deliberately git-ignored and not part of this repository, since a useful dataset for this tends to involve real watch-history data — keep it local-only.
+[**EVAL_RESULTS.md**](EVAL_RESULTS.md) publishes aggregate accuracy numbers for Jev's classification (sample size, accuracy, false-positive/negative counts) — never a video title, URL, or any other content from anyone's actual watch history.
 
 ## License
 
