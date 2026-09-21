@@ -70,7 +70,14 @@ popup.html/.js/.css    Popup UI: connect button, watch-instruction, disconnect b
 
 ## Evaluating classification accuracy
 
-[**EVAL_RESULTS.md**](EVAL_RESULTS.md) publishes aggregate accuracy numbers for Jev's classification (sample size, accuracy, false-positive/negative counts) — never a video title, URL, or any other content from anyone's actual watch history.
+Alux asks Jev to answer one TRUE/FALSE question per video (e.g. "is this video primarily about food, cooking, eating, restaurants, or food preparation?"), derived from a plain-language instruction like "alert me if I'm watching food videos." To measure how accurate that classification is, a small set of well-known public videos was hand-labeled with the correct answer for a given instruction, then run through the exact same classification logic the extension uses in production — not a separate reimplementation — and each prediction was compared against its known-correct label. The numbers below are aggregate counts and rates only: no video titles, URLs, channel names, or any personal watch-history content.
+
+**Latest run** (2026-09-20): 5 cases (5 scored, 0 errored) — **100% accuracy**, 0 false positives, 0 false negatives.
+
+| Date | Cases scored | Accuracy | False positives | False negatives | Errors |
+| --- | --- | --- | --- | --- | --- |
+| 2026-09-20 | 5 | 100% | 0 | 0 | 0 |
+| 2026-09-20 | 5 | 100% | 0 | 0 | 0 |
 
 ## License
 

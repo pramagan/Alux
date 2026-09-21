@@ -3,9 +3,8 @@
 // network calls, no chrome.* APIs. Run with: node tests/lib.test.js
 //
 // This deliberately does NOT cover queryYoutubeHistory() (needs chrome.history)
-// or lib/openrouter.js's network functions (need a real API key and cost
-// money) — those are exercised by the manual/semi-manual tiers documented in
-// TESTING.md instead.
+// or lib/openrouter.js's network functions (need a real API key, cost
+// money, and need a real Chrome browser to exercise).
 import assert from 'node:assert/strict';
 import * as watch from '../lib/watch.js';
 import * as reflection from '../lib/reflection.js';
