@@ -101,9 +101,7 @@ function renderInsight(insight, { autoSpeak = false } = {}) {
     return;
   }
   insightText.textContent = insight.text;
-  const checkedAt = `checked ${new Date(insight.at).toLocaleString()}`;
-  const confidencePct = Math.round((insight.confidence ?? 0) * 100);
-  insightTime.textContent = `${checkedAt} · Jev confidence ${confidencePct}%`;
+  insightTime.textContent = `checked ${new Date(insight.at).toLocaleString()}`;
   insightEl.hidden = false;
   speakBtn.hidden = false;
 

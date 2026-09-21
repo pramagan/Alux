@@ -160,10 +160,8 @@ on YouTube in this browser profile within the last 30 days (`HISTORY_LOOKBACK_MS
    history uncapped, `N` can be well over 50, in which case `K` should be
    `ceil(N/50)` (Jev requests are batched at 50 videos per call).
 4. **Expect (popup result):** `#insight` becomes visible with new text in
-   `#insight-text`, and `#insight-time` always reads `checked <date/time> ·
-   Jev confidence N%` — the confidence suffix now shows every time,
-   flagged or not (this is the overall match rate across the batch, not any
-   single video's score).
+   `#insight-text`, and `#insight-time` reads just `checked <date/time>` —
+   no confidence percentage shown anymore.
 
 ### UI-5b. Strikes are per-check (reset every time), and drive flagging
 
