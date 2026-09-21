@@ -5,6 +5,7 @@ const connectBtn = document.getElementById('connect-btn');
 const connectError = document.getElementById('connect-error');
 const disconnectBtn = document.getElementById('disconnect-btn');
 const instructionInput = document.getElementById('instruction-input');
+const intentQuestionEl = document.getElementById('intent-question');
 const voiceSelect = document.getElementById('voice-select');
 const saveSettingsBtn = document.getElementById('save-settings-btn');
 const checkHistoryBtn = document.getElementById('check-history-btn');
@@ -12,6 +13,7 @@ const historyError = document.getElementById('history-error');
 const insightEl = document.getElementById('insight');
 const insightText = document.getElementById('insight-text');
 const insightTime = document.getElementById('insight-time');
+const searchLink = document.getElementById('search-link');
 const speakBtn = document.getElementById('speak-btn');
 const strikeCountEl = document.getElementById('strike-count');
 
@@ -61,16 +63,15 @@ function speakWithBrowserVoice(text) {
 // browser's built-in speechSynthesis if that fails (e.g. not connected yet).
 // Resolves once the voice has actually finished speaking. `isInitialAlert`
 // marks the very first time a flagged note gets spoken (from "Check now") —
-// once the voice ends, the alert is considered delivered: the strike gets
-// recorded, the stored message cleared server-side, the browser gets
-// redirected to a YouTube search for the suggested alternative (`searchQuery`
-// — see directToYoutubeSearch() in background.js), and the note removed from
-// view here. Replaying via the 🔊 button afterward passes neither flag, so it
-// never re-triggers any of that.
+// once the voice ends, the alert is considered delivered and the strike
+// gets recorded. There is no automatic redirect: the suggested alternative
+// stays visible as a clickable link (see renderInsight below) that the user
+// opens themselves, whenever they want. Replaying via the 🔊 button
+// afterward passes neither flag, so it never re-records a strike.
 // Disabled for the whole call (not just the click) so autoSpeak and Replay
 // can't overlap each other either — otherwise two voices can end up playing
 // on top of one another.
-async function speakText(text, { isInitialAlert = false, searchQuery = null } = {}) {
+async function speakText(text, { isInitialAlert = false } = {}) {
   if (!text) return;
 
   const originalLabel = speakBtn.textContent;
@@ -87,9 +88,8 @@ async function speakText(text, { isInitialAlert = false, searchQuery = null } = 
     }
 
     if (isInitialAlert) {
-      const { strikeCount } = await send({ type: 'ALERT_DELIVERED', searchQuery });
+      const { strikeCount } = await send({ type: 'ALERT_DELIVERED' });
       renderStrikeCount(strikeCount);
-      insightEl.hidden = true;
     }
   } finally {
     speakBtn.disabled = false;
@@ -104,17 +104,20 @@ function renderInsight(insight, { autoSpeak = false } = {}) {
   }
   insightText.textContent = insight.text;
   const checkedAt = `checked ${new Date(insight.at).toLocaleString()}`;
-  if (insight.flagged) {
-    const confidencePct = Math.round((insight.confidence ?? 0) * 100);
-    insightTime.textContent = `${checkedAt} · Jev confidence ${confidencePct}%`;
-  } else {
-    insightTime.textContent = checkedAt;
-  }
+  const confidencePct = Math.round((insight.confidence ?? 0) * 100);
+  insightTime.textContent = `${checkedAt} · Jev confidence ${confidencePct}%`;
   insightEl.hidden = false;
   speakBtn.hidden = false;
 
+  if (insight.searchQuery) {
+    searchLink.href = `https://www.youtube.com/results?search_query=${encodeURIComponent(insight.searchQuery)}`;
+    searchLink.hidden = false;
+  } else {
+    searchLink.hidden = true;
+  }
+
   if (autoSpeak && insight.flagged) {
-    speakText(insight.text, { isInitialAlert: true, searchQuery: insight.searchQuery });
+    speakText(insight.text, { isInitialAlert: true });
   }
 }
 
@@ -126,12 +129,22 @@ async function refreshStatus() {
   if (connected) await refreshWatchSettings();
 }
 
+function renderIntentQuestion(question) {
+  if (!question) {
+    intentQuestionEl.hidden = true;
+    return;
+  }
+  intentQuestionEl.textContent = `Jev will check: "${question}"`;
+  intentQuestionEl.hidden = false;
+}
+
 async function refreshWatchSettings() {
-  const { instruction, ttsVoice, insight, strikeCount } = await send({ type: 'GET_WATCH_SETTINGS' });
+  const { instruction, ttsVoice, insight, strikeCount, intentQuestion } = await send({ type: 'GET_WATCH_SETTINGS' });
   instructionInput.value = instruction;
   voiceSelect.value = ttsVoice;
   renderInsight(insight);
   renderStrikeCount(strikeCount);
+  renderIntentQuestion(intentQuestion);
 }
 
 connectBtn.addEventListener('click', async () => {
@@ -155,7 +168,8 @@ disconnectBtn.addEventListener('click', async () => {
 });
 
 saveSettingsBtn.addEventListener('click', async () => {
-  await send({ type: 'SET_WATCH_SETTINGS', instruction: instructionInput.value, ttsVoice: voiceSelect.value });
+  const result = await send({ type: 'SET_WATCH_SETTINGS', instruction: instructionInput.value, ttsVoice: voiceSelect.value });
+  renderIntentQuestion(result.intentQuestion);
   const original = saveSettingsBtn.textContent;
   saveSettingsBtn.textContent = 'Saved';
   setTimeout(() => { saveSettingsBtn.textContent = original; }, 1200);
@@ -177,6 +191,7 @@ checkHistoryBtn.addEventListener('click', async () => {
     historyError.hidden = false;
     return;
   }
+  renderStrikeCount(result.insight.strikeCount);
   renderInsight(result.insight, { autoSpeak: true });
 });
 

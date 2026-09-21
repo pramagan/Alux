@@ -17,32 +17,24 @@ const VIDEO_LOG_KEY = 'videoClassificationLog';
 const MESSAGE_LOG_KEY = 'messageLog';
 const MAX_VIDEO_LOG = 500;
 const MAX_MESSAGE_LOG = 50;
-// Lifetime count of flagged checks — unlike messageLog this is never trimmed,
-// so it stays accurate even after old log entries age out.
+// This check's own strike count. No history kept across checks: every
+// "Check now" (or periodic run) recomputes it from scratch and overwrites
+// whatever was there before — see checkYoutubeHistory().
 const STRIKE_COUNT_KEY = 'strikeCount';
-// A cursor into watch history: the lastVisitTime of the newest video already
-// considered by a completed check. queryYoutubeHistory() never re-includes
-// videos at or before this point, so a video is never reclassified (or
-// re-alerted on). Only advances once a check completes successfully (see the
-// end of checkYoutubeHistory()), so a transient failure mid-check gets
-// retried from the same point next time rather than silently skipping those
-// videos forever.
-const LAST_PROCESSED_VISIT_KEY = 'lastProcessedVisitTime';
 // Cached { instruction, question } from watch.parseIntentResponse() —
 // regenerated only when the instruction text changes, so the LLM
 // intent-extraction call doesn't run on every check.
 const INTENT_KEY = 'jevIntent';
+// Max videos sent to Jev in a single decision call — see checkYoutubeHistory()'s
+// batching loop.
+const JEV_BATCH_SIZE = 50;
 
 // Proactive path: alongside the manual "Check now" button, a recurring alarm
 // runs the same two-step cascade unattended and fires an OS notification when
 // it flags something, so a doomscrolling session actually gets interrupted
 // instead of only being visible if the user happens to open the popup.
 const CHECK_ALARM_NAME = 'alux-periodic-check';
-const CHECK_INTERVAL_MINUTES = 5;
-// Used as the alarm's schedule, and as the width of the watch-history window
-// itself — see checkYoutubeHistory()'s call to queryYoutubeHistory(), which
-// windows around the last video actually watched, not around Date.now().
-const CHECK_INTERVAL_MS = CHECK_INTERVAL_MINUTES * 60 * 1000;
+const CHECK_INTERVAL_MINUTES = 60;
 
 chrome.runtime.onInstalled.addListener(ensurePeriodicCheckAlarm);
 chrome.runtime.onStartup.addListener(ensurePeriodicCheckAlarm);
@@ -67,21 +59,24 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === CHECK_ALARM_NAME) runPeriodicCheck();
 });
 
-// Runs the same cascade as "Check now", but unattended: errors (not
-// connected, no instruction set, no recent history) are expected in this
-// path and simply mean "nothing to do yet", not a failure to surface.
+// Runs the same cascade as "Check now", but unattended, on the hourly
+// alarm below: errors (not connected, no instruction set) are expected in
+// this path and simply mean "nothing to do yet", not a failure to surface.
+//
+// checkYoutubeHistory() always runs to completion first, which is what
+// (re)computes and persists strikeCount — so strikes update on this
+// unattended hourly cadence exactly the same as a manual "Check now",
+// whether or not the interruption below actually ends up happening.
 //
 // "Alerted" here means pause + spoken note delivered. Since this path has no
 // popup open to play audio in, the note is spoken directly in the YouTube tab
-// via lib/content-pause.js instead. Only once that's done (or at least
-// attempted) does the strike get recorded and the message cleared — see
-// finalizeAlert().
+// via lib/content-pause.js instead. The message only gets cleared once
+// that's done (or at least attempted) — see finalizeAlert().
 //
-// The check itself always runs (cheap, and keeps the reaction-tracking
-// history in lib/reflection.js up to date), but the actual interruption is
-// skipped if the user isn't currently on YouTube — pausing/speaking/notifying
-// about a session they already left is just noise, and the insight stays
-// stored (uncleared, strike not recorded) so it can still surface later.
+// The interruption itself is skipped if the user isn't currently on
+// YouTube — pausing/speaking/notifying about a session they already left is
+// just noise — but the insight stays stored (uncleared) so it can still
+// surface later, e.g. next time the popup opens.
 async function runPeriodicCheck() {
   let insight;
   try {
@@ -110,7 +105,6 @@ async function runPeriodicCheck() {
     message: insight.text
   });
 
-  await directToYoutubeSearch(insight.searchQuery);
   await finalizeAlert();
 }
 
@@ -160,37 +154,20 @@ async function playAudioInYoutubeTabs(audioUrl) {
   );
 }
 
-// Navigates the user straight to the suggested alternative: a YouTube search
-// for the model's `search_query` (see buildWriteupMessages/parseWriteupResponse
-// in lib/watch.js). Prefers replacing the video the user was just watching
-// (the active YouTube tab, if any) over opening a redundant new one; falls
-// back to a new tab if no YouTube tab is open at all. No-ops if the model
-// didn't return a usable search query.
-async function directToYoutubeSearch(searchQuery) {
-  if (!searchQuery) return;
-
-  const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchQuery)}`;
-  const tabs = await chrome.tabs.query({ url: '*://*.youtube.com/*' });
-
-  if (tabs.length === 0) {
-    await chrome.tabs.create({ url: searchUrl });
-    return;
-  }
-
-  const targetTab = tabs.find((tab) => tab.active) || tabs[0];
-  await chrome.tabs.update(targetTab.id, { url: searchUrl });
-}
-
-// Marks a flagged note as delivered: records the strike (lifetime count,
-// never trimmed) and clears the stored insight, since the message has now
-// been paused-for and spoken — it shouldn't linger as a stale reminder next
-// time the popup opens. Called once alerting (pause + voice) has happened,
-// from both the periodic path above and the manual "Check now" path (via the
-// ALERT_DELIVERED message from popup.js after it plays the note).
+// Marks a flagged note as delivered. The note/suggestion (including its
+// search_query, see buildWriteupMessages/parseWriteupResponse in lib/watch.js)
+// stays visible in the popup afterward rather than being cleared or
+// auto-navigated to — the user clicks the "watch something else" link
+// themselves when they want it (see popup.html/popup.js), there's no
+// automatic redirect. Called once alerting (pause + voice) has happened,
+// from both the periodic path above and the manual "Check now" path (via
+// the ALERT_DELIVERED message from popup.js after it plays the note).
+// Strikes are NOT recorded here — see checkYoutubeHistory(), which records
+// them per-batch as part of the check itself, independent of whether the
+// interruption actually gets delivered.
 async function finalizeAlert() {
   const stored = await chrome.storage.local.get(STRIKE_COUNT_KEY);
-  const strikeCount = (stored[STRIKE_COUNT_KEY] || 0) + 1;
-  await chrome.storage.local.set({ [STRIKE_COUNT_KEY]: strikeCount, [INSIGHT_KEY]: null });
+  const strikeCount = stored[STRIKE_COUNT_KEY] || 0;
   return strikeCount;
 }
 
@@ -222,9 +199,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         .catch((err) => sendResponse({ ok: false, error: err.message }));
       return true;
     case 'ALERT_DELIVERED':
-      directToYoutubeSearch(message.searchQuery)
-        .then(() => finalizeAlert())
-        .then((strikeCount) => sendResponse({ ok: true, strikeCount }));
+      finalizeAlert().then((strikeCount) => sendResponse({ ok: true, strikeCount }));
       return true;
     default:
       return false;
@@ -271,12 +246,25 @@ async function getStatus() {
 }
 
 async function getWatchSettings() {
-  const stored = await chrome.storage.local.get([INSTRUCTION_KEY, TTS_VOICE_KEY, INSIGHT_KEY, STRIKE_COUNT_KEY]);
+  const stored = await chrome.storage.local.get([
+    INSTRUCTION_KEY,
+    TTS_VOICE_KEY,
+    INSIGHT_KEY,
+    STRIKE_COUNT_KEY,
+    INTENT_KEY
+  ]);
+  const instruction = stored[INSTRUCTION_KEY] || '';
+  const cachedIntent = stored[INTENT_KEY];
   return {
-    instruction: stored[INSTRUCTION_KEY] || '',
+    instruction,
     ttsVoice: stored[TTS_VOICE_KEY] || openrouter.DEFAULT_TTS_VOICE,
     insight: stored[INSIGHT_KEY] || null,
-    strikeCount: stored[STRIKE_COUNT_KEY] || 0
+    strikeCount: stored[STRIKE_COUNT_KEY] || 0,
+    // Only surface the cached question if it was actually derived from the
+    // instruction as currently saved — a stale cache from a prior
+    // instruction (e.g. extraction failed after the user changed the text)
+    // would otherwise show a question that doesn't match what's in the box.
+    intentQuestion: cachedIntent && cachedIntent.instruction === instruction ? cachedIntent.question : null
   };
 }
 
@@ -297,20 +285,22 @@ async function setWatchSettings(instruction, ttsVoice) {
     [TTS_VOICE_KEY]: (ttsVoice || '').trim()
   });
 
+  let intentQuestion = null;
   if (trimmedInstruction) {
     const stored = await chrome.storage.local.get([STORAGE_KEY, WRITEUP_MODEL_KEY]);
     const apiKey = stored[STORAGE_KEY];
     if (apiKey) {
       const writeupModel = (stored[WRITEUP_MODEL_KEY] || '').trim() || openrouter.DEFAULT_WRITEUP_MODEL;
       try {
-        await getOrExtractIntent(apiKey, trimmedInstruction, writeupModel);
+        const intent = await getOrExtractIntent(apiKey, trimmedInstruction, writeupModel);
+        intentQuestion = intent.question;
       } catch (err) {
         console.warn('Alux: intent extraction on save failed, will retry on next check:', err.message);
       }
     }
   }
 
-  return { ok: true };
+  return { ok: true, intentQuestion };
 }
 
 // Reuses the cached intent if the instruction hasn't changed since it was
@@ -335,10 +325,13 @@ async function getOrExtractIntent(apiKey, instruction, model) {
 //    typed questions. See getOrExtractIntent / lib/watch.js buildIntentExtractionMessages.
 // 1. Best-effort enrich each history entry with description/channel name
 //    (lib/videoinfo.js — unofficial page scrape, empty strings on failure),
-//    then ask Jev to answer that question individually for each video in one
-//    call — see lib/watch.js buildJevDecisionRequest / classifyEntries.
-// 2. Flagging is derived directly from the resulting match rate (no separate
-//    "is this worth mentioning" gate) against FLAG_THRESHOLD.
+//    then ask Jev to answer that question for each video, batched into
+//    fixed-size calls — see lib/watch.js buildJevDecisionRequest / chunk /
+//    classifyEntries.
+// 2. Each batch's own match rate earns a strike if it exceeds
+//    STRIKE_MATCH_THRESHOLD; the strike count resets every check (not
+//    cumulative) and flagging is simply strikeCount > 0 — no separate
+//    aggregate-match-rate gate.
 // 3. Compare this check's match rate against the message log to see how the
 //    user reacted since the last note (lib/reflection.js) — did they cut
 //    back, ignore it, or cut back and then relapse?
@@ -351,9 +344,12 @@ async function checkYoutubeHistory() {
     STORAGE_KEY,
     INSTRUCTION_KEY,
     WRITEUP_MODEL_KEY,
-    LAST_PROCESSED_VISIT_KEY,
-    INSIGHT_KEY
+    INSIGHT_KEY,
+    STRIKE_COUNT_KEY
   ]);
+  // No persistent strike history — delete any leftover log from an earlier
+  // version of this feature so it can't linger or get read by mistake.
+  await chrome.storage.local.remove('strikeLog');
   const apiKey = stored[STORAGE_KEY];
   if (!apiKey) throw new Error('Not connected to OpenRouter yet.');
 
@@ -362,51 +358,92 @@ async function checkYoutubeHistory() {
 
   const writeupModel = (stored[WRITEUP_MODEL_KEY] || '').trim() || openrouter.DEFAULT_WRITEUP_MODEL;
 
-  // Window is anchored to the last video actually watched, not to Date.now()
-  // — see queryYoutubeHistory()'s doc comment. sinceTimestamp here is purely
-  // the "don't reprocess" cursor (0 for the very first check ever), not a
-  // lookback duration.
-  const sinceTimestamp = stored[LAST_PROCESSED_VISIT_KEY] || 0;
-
-  let entries = await watch.queryYoutubeHistory(CHECK_INTERVAL_MS, sinceTimestamp);
+  // No window, no cursor, no de-dup — see queryYoutubeHistory()'s doc
+  // comment. Every check re-fetches the raw YouTube watch/Shorts history
+  // (capped to the 1000 most recent videos), so this only comes back empty
+  // if the browser has literally never recorded such a visit. The same
+  // video can appear more than once (repeat visits aren't collapsed) and
+  // can be reclassified across multiple checks; that's an accepted tradeoff
+  // for this being close to the raw data with minimal filtering logic.
+  let entries = await watch.queryYoutubeHistory();
   if (entries.length === 0) {
-    // Nothing new to classify — re-surface whatever was last computed rather
-    // than erroring, so "Check now" (and the periodic alarm) keep showing
-    // something meaningful instead of a dead-end message. This also means a
-    // previously-flagged insight that never got delivered (e.g. the user
-    // wasn't on YouTube at the time) keeps getting another chance to surface.
-    if (stored[INSIGHT_KEY]) return stored[INSIGHT_KEY];
+    const strikeCount = stored[STRIKE_COUNT_KEY] || 0;
+    if (stored[INSIGHT_KEY]) return { ...stored[INSIGHT_KEY], strikeCount };
     return {
-      text: "Alux hasn't seen any new YouTube watches to check yet.",
+      text: "Alux hasn't seen any YouTube watches to check yet.",
       searchQuery: null,
       at: Date.now(),
       flagged: false,
       confidence: 0,
       matchRate: 0,
-      reaction: null
+      reaction: null,
+      strikeCount
     };
   }
   entries = await videoinfo.enrichEntriesWithPageInfo(entries);
 
   const intent = await getOrExtractIntent(apiKey, instruction, writeupModel);
 
-  const decisionRequest = watch.buildJevDecisionRequest(entries, intent);
-  const answers = await openrouter.askJevDecision(apiKey, decisionRequest);
+  // queryYoutubeHistory() no longer caps how many videos it returns, so a
+  // single Jev call could carry an unbounded number of them and risk
+  // exceeding Jev's context window. Break into fixed-size batches, call Jev
+  // once per batch, and merge the answers back into one object keyed the
+  // same way classifyEntries() expects (video_<id> -> { noul: confidence }).
+  //
+  // Strikes are counted per batch: each ~50-video chunk gets its own match
+  // rate, and every chunk whose rate exceeds STRIKE_MATCH_THRESHOLD (0.7)
+  // adds one strike. A check over the full 1000-video history can therefore
+  // earn up to 10 strikes at once — this reflects how much of your whole
+  // recent history leaned toward the watched-for content, not just whether
+  // the latest chunk did. This total (not the old aggregate match rate) is
+  // what now drives both the strike count and the flagged/interruption
+  // decision below.
+  const batches = watch.chunk(entries, JEV_BATCH_SIZE);
+  console.log(`[Alux] checkYoutubeHistory: classifying ${entries.length} video(s) in ${batches.length} Jev call(s).`);
+  const answers = {};
+  let batchStrikes = 0;
+  for (let i = 0; i < batches.length; i++) {
+    const decisionRequest = watch.buildJevDecisionRequest(batches[i], intent);
+    const batchAnswers = await openrouter.askJevDecision(apiKey, decisionRequest);
+    Object.assign(answers, batchAnswers);
+
+    const batchMatchRate = watch.matchRate(watch.classifyEntries(batches[i], batchAnswers));
+    const earnedStrike = batchMatchRate > watch.STRIKE_MATCH_THRESHOLD;
+    if (earnedStrike) batchStrikes++;
+    console.log(
+      `[Alux] checkYoutubeHistory: batch ${i + 1}/${batches.length} done (${batches[i].length} videos, ` +
+        `match rate ${Math.round(batchMatchRate * 100)}%${earnedStrike ? ' — strike' : ''}). ` +
+        `Strikes so far this check: ${batchStrikes}.`
+    );
+  }
 
   const classifications = watch.classifyEntries(entries, answers);
   const currentMatchRate = watch.matchRate(classifications);
   const confidence = currentMatchRate;
-  const flagged = currentMatchRate > watch.FLAG_THRESHOLD;
+
+  // Strike count is recomputed from scratch every check and overwrites
+  // whatever was there before — no history, no accumulation.
+  // queryYoutubeHistory() has no cursor, so the same history can be
+  // re-scored on the very next check; keeping any state across checks on
+  // top of that would just inflate or misrepresent the count.
+  const strikeCount = batchStrikes;
+  await chrome.storage.local.set({ [STRIKE_COUNT_KEY]: strikeCount });
+
+  const flagged = strikeCount > 0;
+  console.log(
+    `[Alux] checkYoutubeHistory: ${strikeCount} strike(s) this check (aggregate match rate ` +
+      `${Math.round(currentMatchRate * 100)}% across ${entries.length} video(s)) — flagged=${flagged}.`
+  );
 
   const { messageLog } = await getLogs();
   const { reaction, note: reactionNote } = reflection.describeReaction(messageLog, currentMatchRate);
 
-  let text = "Alux checked — nothing in your recent YouTube history matched what you asked it to watch for.";
+  let text = 'Alux checked — no strikes this time; nothing in your recent YouTube history crossed the line.';
   let searchQuery = null;
   if (flagged) {
     const raw = await openrouter.sendChatMessage(
       apiKey,
-      watch.buildWriteupMessages(instruction, entries, reactionNote, intent),
+      watch.buildWriteupMessages(instruction, entries, reactionNote, intent, strikeCount),
       writeupModel,
       { responseFormat: 'json_object' }
     );
@@ -414,9 +451,8 @@ async function checkYoutubeHistory() {
   }
 
   const at = Date.now();
-  // Strike + clearing the message + the auto-redirect happen later, once the
-  // alert is actually delivered (pause + voice) — see finalizeAlert() and
-  // directToYoutubeSearch().
+  // searchQuery becomes a clickable link in the popup (see renderInsight()
+  // in popup.js) — there's no automatic navigation to it.
   const insight = { text, searchQuery, at, flagged, confidence, matchRate: currentMatchRate, reaction };
   await chrome.storage.local.set({ [INSIGHT_KEY]: insight });
   await appendLogs({
@@ -424,12 +460,7 @@ async function checkYoutubeHistory() {
     message: { at, flagged, matchRate: currentMatchRate, confidence, instruction, reaction }
   });
 
-  // Only advance the cursor once the check has fully succeeded — if
-  // something above threw (e.g. a transient API error), the next check
-  // retries from the same point instead of silently skipping these videos.
-  const newestVisit = Math.max(...entries.map((e) => e.lastVisitTime));
-  await chrome.storage.local.set({ [LAST_PROCESSED_VISIT_KEY]: newestVisit });
-  return insight;
+  return { ...insight, strikeCount };
 }
 
 async function getLogs() {

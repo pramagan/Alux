@@ -66,6 +66,17 @@ button:hover {
   text-decoration: underline;
 }
 
+a.link-btn {
+  display: inline-block;
+  cursor: pointer;
+}
+
+.insight-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
 .error {
   color: #c0392b;
   font-size: 12px;
@@ -80,6 +91,17 @@ h2 {
   display: block;
   font-size: 11px;
   color: #666;
+  margin: 0 0 6px;
+}
+
+.intent-question {
+  display: block;
+  font-size: 11px;
+  font-style: italic;
+  color: #555;
+  background: #f5f0e6;
+  border-radius: 6px;
+  padding: 6px 8px;
   margin: 0 0 6px;
 }
 
