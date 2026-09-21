@@ -8,7 +8,6 @@ const STORAGE_KEY = 'openrouterKey';
 const INSTRUCTION_KEY = 'watchInstruction';
 const WRITEUP_MODEL_KEY = 'writeupModel';
 const TTS_MODEL_KEY = 'ttsModel';
-const TTS_VOICE_KEY = 'ttsVoice';
 const INSIGHT_KEY = 'lastInsight';
 // Per-video Jev classifications and past messages, kept so notes can be
 // tailored to whether the user actually changed behavior since the last one
@@ -186,7 +185,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       getWatchSettings().then(sendResponse);
       return true;
     case 'SET_WATCH_SETTINGS':
-      setWatchSettings(message.instruction, message.ttsVoice).then(sendResponse);
+      setWatchSettings(message.instruction).then(sendResponse);
       return true;
     case 'CHECK_YOUTUBE_HISTORY':
       checkYoutubeHistory()
@@ -246,61 +245,44 @@ async function getStatus() {
 }
 
 async function getWatchSettings() {
-  const stored = await chrome.storage.local.get([
-    INSTRUCTION_KEY,
-    TTS_VOICE_KEY,
-    INSIGHT_KEY,
-    STRIKE_COUNT_KEY,
-    INTENT_KEY
-  ]);
-  const instruction = stored[INSTRUCTION_KEY] || '';
-  const cachedIntent = stored[INTENT_KEY];
+  const stored = await chrome.storage.local.get([INSTRUCTION_KEY, INSIGHT_KEY, STRIKE_COUNT_KEY]);
   return {
-    instruction,
-    ttsVoice: stored[TTS_VOICE_KEY] || openrouter.DEFAULT_TTS_VOICE,
+    instruction: stored[INSTRUCTION_KEY] || '',
     insight: stored[INSIGHT_KEY] || null,
-    strikeCount: stored[STRIKE_COUNT_KEY] || 0,
-    // Only surface the cached question if it was actually derived from the
-    // instruction as currently saved — a stale cache from a prior
-    // instruction (e.g. extraction failed after the user changed the text)
-    // would otherwise show a question that doesn't match what's in the box.
-    intentQuestion: cachedIntent && cachedIntent.instruction === instruction ? cachedIntent.question : null
+    strikeCount: stored[STRIKE_COUNT_KEY] || 0
   };
 }
 
-// writeupModel/ttsModel are plugin config, not user-facing — set directly in
-// chrome.storage.local (e.g. by an admin/dev tool), never through the popup UI.
-// ttsVoice is the one user-friendly knob, exposed via the popup's voice picker.
+// writeupModel/ttsModel/tts voice are plugin config, not user-facing — set
+// directly in chrome.storage.local (e.g. by an admin/dev tool), never
+// through the popup UI. The spoken note always uses openrouter.DEFAULT_TTS_VOICE
+// (see speakText() below) — there's no per-user voice picker.
 //
 // Also eagerly extracts/caches the Jev intent (subject + criteria) for the
 // saved instruction right away, via getOrExtractIntent() below, instead of
 // waiting for the first check to need it — so by the time a check actually
-// runs, classification is ready to go immediately. If extraction fails here
-// (network hiccup, not connected yet) it's not fatal: the instruction still
-// saves, and checkYoutubeHistory() will retry extraction lazily on its own.
-async function setWatchSettings(instruction, ttsVoice) {
+// runs, classification is ready to go immediately. Not surfaced to the popup
+// UI, just a warm-cache optimization. If extraction fails here (network
+// hiccup, not connected yet) it's not fatal: the instruction still saves,
+// and checkYoutubeHistory() will retry extraction lazily on its own.
+async function setWatchSettings(instruction) {
   const trimmedInstruction = (instruction || '').trim();
-  await chrome.storage.local.set({
-    [INSTRUCTION_KEY]: trimmedInstruction,
-    [TTS_VOICE_KEY]: (ttsVoice || '').trim()
-  });
+  await chrome.storage.local.set({ [INSTRUCTION_KEY]: trimmedInstruction });
 
-  let intentQuestion = null;
   if (trimmedInstruction) {
     const stored = await chrome.storage.local.get([STORAGE_KEY, WRITEUP_MODEL_KEY]);
     const apiKey = stored[STORAGE_KEY];
     if (apiKey) {
       const writeupModel = (stored[WRITEUP_MODEL_KEY] || '').trim() || openrouter.DEFAULT_WRITEUP_MODEL;
       try {
-        const intent = await getOrExtractIntent(apiKey, trimmedInstruction, writeupModel);
-        intentQuestion = intent.question;
+        await getOrExtractIntent(apiKey, trimmedInstruction, writeupModel);
       } catch (err) {
         console.warn('Alux: intent extraction on save failed, will retry on next check:', err.message);
       }
     }
   }
 
-  return { ok: true, intentQuestion };
+  return { ok: true };
 }
 
 // Reuses the cached intent if the instruction hasn't changed since it was
@@ -479,19 +461,19 @@ async function appendLogs({ classifications, message }) {
   });
 }
 
-// ttsModel is plugin config, not user-facing — same pattern as writeupModel,
-// set directly in chrome.storage.local. ttsVoice is user-facing via the popup.
+// ttsModel is plugin config, not user-facing — set directly in
+// chrome.storage.local. The voice is always openrouter.DEFAULT_TTS_VOICE —
+// no per-user picker, to keep the popup UI simple.
 async function speakText(text) {
-  const stored = await chrome.storage.local.get([STORAGE_KEY, TTS_MODEL_KEY, TTS_VOICE_KEY]);
+  const stored = await chrome.storage.local.get([STORAGE_KEY, TTS_MODEL_KEY]);
   const apiKey = stored[STORAGE_KEY];
   if (!apiKey) throw new Error('Not connected to OpenRouter yet.');
   if (!text) throw new Error('Nothing to speak.');
 
   const ttsModel = (stored[TTS_MODEL_KEY] || '').trim() || openrouter.DEFAULT_TTS_MODEL;
-  const ttsVoice = (stored[TTS_VOICE_KEY] || '').trim() || openrouter.DEFAULT_TTS_VOICE;
 
   await pauseYoutubeVideos();
-  const audioBuffer = await openrouter.synthesizeSpeech(apiKey, text, ttsModel, ttsVoice);
+  const audioBuffer = await openrouter.synthesizeSpeech(apiKey, text, ttsModel, openrouter.DEFAULT_TTS_VOICE);
   return `data:audio/mpeg;base64,${arrayBufferToBase64(audioBuffer)}`;
 }
 

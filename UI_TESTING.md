@@ -67,8 +67,8 @@ button at the bottom of the watch-view section to reset to this state).
 1. Open the popup tab. **Expect:** the header status pill reads "not
    connected", and the page shows "Connect your OpenRouter account so Alux
    can watch on your behalf..." with a **"Connect OpenRouter account"**
-   button (`#connect-btn`). The watch-settings section (textarea, voice
-   picker, Save/Check now buttons) must be hidden.
+   button (`#connect-btn`). The watch-settings section (textarea,
+   Save/Check now buttons) must be hidden.
 2. Click **"Connect OpenRouter account"**. This opens OpenRouter's OAuth
    consent screen in a new tab/window — completing it requires a real
    OpenRouter account login, so if no test account is available, stop here
@@ -77,9 +77,10 @@ button at the bottom of the watch-view section to reset to this state).
    **Expect:** the header status pill now reads "connected" (and gets a
    distinguishing style — check `#status.connected` if you can read
    classes), the connect section hides, and the watch-settings section
-   (`#watch-view`) becomes visible with the instruction textarea, voice
-   dropdown, "Save"/"Check now" buttons, and a "Disconnect" link at the
-   bottom.
+   (`#watch-view`) becomes visible with the instruction textarea,
+   "Save"/"Check now" buttons, and a "Disconnect" link at the bottom. There
+   is no voice picker — the spoken note always uses one fixed voice
+   (`openrouter.DEFAULT_TTS_VOICE`).
 
 ### UI-2. Save an instruction
 
@@ -89,19 +90,13 @@ button at the bottom of the watch-view section to reset to this state).
    type: `Alert me if I am watching too many food videos.`
 2. Click **"Save"** (`#save-settings-btn`).
 3. **Expect:** the button's label briefly changes to "Saved", then reverts
-   to "Save" after about a second.
-4. **Expect:** below the textarea, `#intent-question` becomes visible with
-   text like `Jev will check: "Is this video primarily about food, cooking,
-   eating, restaurants, or food preparation?"` — the actual TRUE/FALSE
-   question extracted from your instruction (this requires being connected,
-   since it's a real OpenRouter call; if extraction fails silently — no API
-   key, network hiccup — this element just stays hidden, which is not
-   itself a failure of this test unless you know extraction should have
-   succeeded).
-5. Reload the popup tab (navigate to the same URL again).
-6. **Expect:** the textarea still contains the exact text you typed, and
-   `#intent-question` still shows the same extracted question — both persist
-   in `chrome.storage.local`, not just in-memory.
+   to "Save" after about a second. There is no visible confirmation of what
+   question got extracted from the instruction — that happens silently in
+   the background (an eager-cache optimization, see `setWatchSettings()` in
+   `background.js`) with nothing shown in the popup UI.
+4. Reload the popup tab (navigate to the same URL again).
+5. **Expect:** the textarea still contains the exact text you typed — it
+   persists in `chrome.storage.local`, not just in-memory.
 
 ### UI-3. Strike count is always visible, even at zero
 

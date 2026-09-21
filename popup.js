@@ -5,8 +5,6 @@ const connectBtn = document.getElementById('connect-btn');
 const connectError = document.getElementById('connect-error');
 const disconnectBtn = document.getElementById('disconnect-btn');
 const instructionInput = document.getElementById('instruction-input');
-const intentQuestionEl = document.getElementById('intent-question');
-const voiceSelect = document.getElementById('voice-select');
 const saveSettingsBtn = document.getElementById('save-settings-btn');
 const checkHistoryBtn = document.getElementById('check-history-btn');
 const historyError = document.getElementById('history-error');
@@ -129,22 +127,11 @@ async function refreshStatus() {
   if (connected) await refreshWatchSettings();
 }
 
-function renderIntentQuestion(question) {
-  if (!question) {
-    intentQuestionEl.hidden = true;
-    return;
-  }
-  intentQuestionEl.textContent = `Jev will check: "${question}"`;
-  intentQuestionEl.hidden = false;
-}
-
 async function refreshWatchSettings() {
-  const { instruction, ttsVoice, insight, strikeCount, intentQuestion } = await send({ type: 'GET_WATCH_SETTINGS' });
+  const { instruction, insight, strikeCount } = await send({ type: 'GET_WATCH_SETTINGS' });
   instructionInput.value = instruction;
-  voiceSelect.value = ttsVoice;
   renderInsight(insight);
   renderStrikeCount(strikeCount);
-  renderIntentQuestion(intentQuestion);
 }
 
 connectBtn.addEventListener('click', async () => {
@@ -168,8 +155,7 @@ disconnectBtn.addEventListener('click', async () => {
 });
 
 saveSettingsBtn.addEventListener('click', async () => {
-  const result = await send({ type: 'SET_WATCH_SETTINGS', instruction: instructionInput.value, ttsVoice: voiceSelect.value });
-  renderIntentQuestion(result.intentQuestion);
+  await send({ type: 'SET_WATCH_SETTINGS', instruction: instructionInput.value });
   const original = saveSettingsBtn.textContent;
   saveSettingsBtn.textContent = 'Saved';
   setTimeout(() => { saveSettingsBtn.textContent = original; }, 1200);
@@ -180,7 +166,7 @@ checkHistoryBtn.addEventListener('click', async () => {
   checkHistoryBtn.disabled = true;
   checkHistoryBtn.textContent = 'Watching…';
 
-  await send({ type: 'SET_WATCH_SETTINGS', instruction: instructionInput.value, ttsVoice: voiceSelect.value });
+  await send({ type: 'SET_WATCH_SETTINGS', instruction: instructionInput.value });
   const result = await send({ type: 'CHECK_YOUTUBE_HISTORY' });
 
   checkHistoryBtn.disabled = false;
