@@ -72,3 +72,7 @@ popup.html/.js/.css    Popup UI: connect button, watch-instruction, disconnect b
 
 An `evals/` folder can measure how accurately Jev classifies real videos against a given instruction, reusing the exact same production code (`lib/watch.js`, `lib/videoinfo.js`, `lib/openrouter.js`) rather than reimplementing it. It's deliberately git-ignored and not part of this repository, since a useful dataset for this tends to involve real watch-history data — keep it local-only.
 
+## License
+
+[MIT](LICENSE) — use it, fork it, modify it, ship it.
+
