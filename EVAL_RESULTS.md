@@ -23,9 +23,3 @@ extension itself — not a reimplementation.
 | --- | --- | --- | --- | --- | --- |
 | 2026-09-20 | 5 | 100% | 0 | 0 | 0 |
 | 2026-09-20 | 5 | 100% | 0 | 0 | 0 |
-
----
-_Regenerate with `node evals/summarize.js` after adding more hand-labeled
-cases to `evals/dataset.json` and re-running `npm run eval`. This file is
-the only eval-related artifact meant to be committed — everything else under
-`evals/` stays local (see `.gitignore`)._
