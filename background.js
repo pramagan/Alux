@@ -24,6 +24,11 @@ const STRIKE_COUNT_KEY = 'strikeCount';
 // regenerated only when the instruction text changes, so the LLM
 // intent-extraction call doesn't run on every check.
 const INTENT_KEY = 'jevIntent';
+// User-chosen per-day match-rate bar for earning a strike (0.25/0.5/0.75 —
+// see the popup's strike-threshold slider). Falls back to
+// watch.DEFAULT_STRIKE_THRESHOLD until the user picks one.
+const STRIKE_THRESHOLD_KEY = 'strikeThreshold';
+const STRIKE_THRESHOLD_STEPS = [0.25, 0.5, 0.75];
 // Max videos sent to Jev in a single decision call — see checkYoutubeHistory()'s
 // batching loop.
 const JEV_BATCH_SIZE = 50;
@@ -33,7 +38,7 @@ const JEV_BATCH_SIZE = 50;
 // it flags something, so a doomscrolling session actually gets interrupted
 // instead of only being visible if the user happens to open the popup.
 const CHECK_ALARM_NAME = 'alux-periodic-check';
-const CHECK_INTERVAL_MINUTES = 60;
+const CHECK_INTERVAL_MINUTES = 24 * 60;
 
 chrome.runtime.onInstalled.addListener(ensurePeriodicCheckAlarm);
 chrome.runtime.onStartup.addListener(ensurePeriodicCheckAlarm);
@@ -58,13 +63,13 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === CHECK_ALARM_NAME) runPeriodicCheck();
 });
 
-// Runs the same cascade as "Check now", but unattended, on the hourly
+// Runs the same cascade as "Check now", but unattended, on the daily
 // alarm below: errors (not connected, no instruction set) are expected in
 // this path and simply mean "nothing to do yet", not a failure to surface.
 //
 // checkYoutubeHistory() always runs to completion first, which is what
 // (re)computes and persists strikeCount — so strikes update on this
-// unattended hourly cadence exactly the same as a manual "Check now",
+// unattended daily cadence exactly the same as a manual "Check now",
 // whether or not the interruption below actually ends up happening.
 //
 // "Alerted" here means pause + spoken note delivered. Since this path has no
@@ -185,7 +190,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       getWatchSettings().then(sendResponse);
       return true;
     case 'SET_WATCH_SETTINGS':
-      setWatchSettings(message.instruction).then(sendResponse);
+      setWatchSettings(message.instruction, message.strikeThreshold).then(sendResponse);
       return true;
     case 'CHECK_YOUTUBE_HISTORY':
       checkYoutubeHistory()
@@ -245,58 +250,83 @@ async function getStatus() {
 }
 
 async function getWatchSettings() {
-  const stored = await chrome.storage.local.get([INSTRUCTION_KEY, INSIGHT_KEY, STRIKE_COUNT_KEY]);
+  const stored = await chrome.storage.local.get([
+    INSTRUCTION_KEY,
+    INSIGHT_KEY,
+    STRIKE_COUNT_KEY,
+    INTENT_KEY,
+    STRIKE_THRESHOLD_KEY
+  ]);
+  const instruction = stored[INSTRUCTION_KEY] || '';
+  const cachedIntent = stored[INTENT_KEY];
   return {
-    instruction: stored[INSTRUCTION_KEY] || '',
+    instruction,
     insight: stored[INSIGHT_KEY] || null,
-    strikeCount: stored[STRIKE_COUNT_KEY] || 0
+    strikeCount: stored[STRIKE_COUNT_KEY] || 0,
+    // Only surface the cached question if it was actually derived from the
+    // instruction as currently saved — a stale cache from a prior
+    // instruction (e.g. extraction failed after the user changed the text)
+    // would otherwise show a question that doesn't match what's in the box.
+    intentQuestion: cachedIntent && cachedIntent.instruction === instruction ? cachedIntent.question : null,
+    strikeThreshold: stored[STRIKE_THRESHOLD_KEY] ?? watch.DEFAULT_STRIKE_THRESHOLD
   };
 }
 
 // writeupModel/ttsModel/tts voice are plugin config, not user-facing — set
 // directly in chrome.storage.local (e.g. by an admin/dev tool), never
 // through the popup UI. The spoken note always uses openrouter.DEFAULT_TTS_VOICE
-// (see speakText() below) — there's no per-user voice picker.
+// (see speakText() below) — there's no per-user voice picker. strikeThreshold
+// IS user-facing (the popup's slider) — falls back to
+// watch.DEFAULT_STRIKE_THRESHOLD if it's not one of the three valid steps.
 //
-// Also eagerly extracts/caches the Jev intent (subject + criteria) for the
-// saved instruction right away, via getOrExtractIntent() below, instead of
-// waiting for the first check to need it — so by the time a check actually
-// runs, classification is ready to go immediately. Not surfaced to the popup
-// UI, just a warm-cache optimization. If extraction fails here (network
+// Also eagerly extracts/caches the Jev intent for the saved instruction
+// right away, via getOrExtractIntent() below, instead of waiting for the
+// first check to need it — so by the time a check actually runs,
+// classification is ready to go immediately, and the popup can show the
+// extracted question right after saving. If extraction fails here (network
 // hiccup, not connected yet) it's not fatal: the instruction still saves,
 // and checkYoutubeHistory() will retry extraction lazily on its own.
-async function setWatchSettings(instruction) {
+async function setWatchSettings(instruction, strikeThreshold) {
   const trimmedInstruction = (instruction || '').trim();
-  await chrome.storage.local.set({ [INSTRUCTION_KEY]: trimmedInstruction });
+  const validThreshold = STRIKE_THRESHOLD_STEPS.includes(strikeThreshold) ? strikeThreshold : watch.DEFAULT_STRIKE_THRESHOLD;
+  await chrome.storage.local.set({
+    [INSTRUCTION_KEY]: trimmedInstruction,
+    [STRIKE_THRESHOLD_KEY]: validThreshold
+  });
 
+  let intentQuestion = null;
   if (trimmedInstruction) {
     const stored = await chrome.storage.local.get([STORAGE_KEY, WRITEUP_MODEL_KEY]);
     const apiKey = stored[STORAGE_KEY];
     if (apiKey) {
       const writeupModel = (stored[WRITEUP_MODEL_KEY] || '').trim() || openrouter.DEFAULT_WRITEUP_MODEL;
       try {
-        await getOrExtractIntent(apiKey, trimmedInstruction, writeupModel);
+        const { intent, costUsd } = await getOrExtractIntent(apiKey, trimmedInstruction, writeupModel);
+        intentQuestion = intent.question;
+        if (costUsd > 0) console.log(`[Alux] setWatchSettings: intent extraction cost $${costUsd.toFixed(6)}.`);
       } catch (err) {
         console.warn('Alux: intent extraction on save failed, will retry on next check:', err.message);
       }
     }
   }
 
-  return { ok: true };
+  return { ok: true, intentQuestion };
 }
 
 // Reuses the cached intent if the instruction hasn't changed since it was
 // last extracted; otherwise calls the writeup model to derive a fresh one
-// (see watch.buildIntentExtractionMessages/parseIntentResponse) and caches it.
+// (see watch.buildIntentExtractionMessages/parseIntentResponse) and caches
+// it. Returns costUsd alongside the intent (0 when served from cache) so
+// callers can fold it into a running total for cost logging.
 async function getOrExtractIntent(apiKey, instruction, model) {
   const stored = await chrome.storage.local.get(INTENT_KEY);
   const cached = stored[INTENT_KEY];
-  if (cached && cached.instruction === instruction) return cached;
+  if (cached && cached.instruction === instruction) return { intent: cached, costUsd: 0 };
 
-  const raw = await openrouter.sendChatMessage(apiKey, watch.buildIntentExtractionMessages(instruction), model);
+  const { content: raw, usage } = await openrouter.sendChatMessage(apiKey, watch.buildIntentExtractionMessages(instruction), model);
   const intent = { instruction, ...watch.parseIntentResponse(raw, instruction) };
   await chrome.storage.local.set({ [INTENT_KEY]: intent });
-  return intent;
+  return { intent, costUsd: openrouter.estimateCostUsd(usage, model) };
 }
 
 // Cascade, run either by clicking "Check now" or by the periodic alarm (see
@@ -307,12 +337,13 @@ async function getOrExtractIntent(apiKey, instruction, model) {
 //    typed questions. See getOrExtractIntent / lib/watch.js buildIntentExtractionMessages.
 // 1. Best-effort enrich each history entry with description/channel name
 //    (lib/videoinfo.js — unofficial page scrape, empty strings on failure),
-//    then ask Jev to answer that question for each video, batched into
-//    fixed-size calls — see lib/watch.js buildJevDecisionRequest / chunk /
-//    classifyEntries.
-// 2. Each batch's own match rate earns a strike if it exceeds
-//    STRIKE_MATCH_THRESHOLD; the strike count resets every check (not
-//    cumulative) and flagging is simply strikeCount > 0 — no separate
+//    then ask Jev to answer that question for each video, one calendar day
+//    at a time (sub-batched within a day into fixed-size Jev calls) — see
+//    lib/watch.js buildJevDecisionRequest / chunk / classifyEntries.
+// 2. Each day's own match rate earns a strike if it exceeds the
+//    user-chosen strike threshold (25%/50%/75%, default 50% — see the
+//    popup's slider); the strike count resets every check (not cumulative)
+//    and flagging is simply strikeCount > 0 — no separate
 //    aggregate-match-rate gate.
 // 3. Compare this check's match rate against the message log to see how the
 //    user reacted since the last note (lib/reflection.js) — did they cut
@@ -327,8 +358,10 @@ async function checkYoutubeHistory() {
     INSTRUCTION_KEY,
     WRITEUP_MODEL_KEY,
     INSIGHT_KEY,
-    STRIKE_COUNT_KEY
+    STRIKE_COUNT_KEY,
+    STRIKE_THRESHOLD_KEY
   ]);
+  const strikeThreshold = stored[STRIKE_THRESHOLD_KEY] ?? watch.DEFAULT_STRIKE_THRESHOLD;
   // No persistent strike history — delete any leftover log from an earlier
   // version of this feature so it can't linger or get read by mistake.
   await chrome.storage.local.remove('strikeLog');
@@ -340,15 +373,15 @@ async function checkYoutubeHistory() {
 
   const writeupModel = (stored[WRITEUP_MODEL_KEY] || '').trim() || openrouter.DEFAULT_WRITEUP_MODEL;
 
-  // No window, no cursor, no de-dup — see queryYoutubeHistory()'s doc
-  // comment. Every check re-fetches the raw YouTube watch/Shorts history
-  // (capped to the 1000 most recent videos), so this only comes back empty
-  // if the browser has literally never recorded such a visit. The same
-  // video can appear more than once (repeat visits aren't collapsed) and
-  // can be reclassified across multiple checks; that's an accepted tradeoff
-  // for this being close to the raw data with minimal filtering logic.
-  let entries = await watch.queryYoutubeHistory();
-  if (entries.length === 0) {
+  // One calendar day at a time, for the past watch.HISTORY_DAYS (30) days —
+  // see queryYoutubeHistory()'s doc comment. No cursor, no de-dup within a
+  // day: the same video can appear more than once (repeat visits aren't
+  // collapsed) and can be reclassified across multiple checks; that's an
+  // accepted tradeoff for this being close to the raw data with minimal
+  // filtering logic.
+  const days = await watch.queryYoutubeHistory();
+  const totalVideos = days.reduce((sum, d) => sum + d.entries.length, 0);
+  if (totalVideos === 0) {
     const strikeCount = stored[STRIKE_COUNT_KEY] || 0;
     if (stored[INSIGHT_KEY]) return { ...stored[INSIGHT_KEY], strikeCount };
     return {
@@ -362,44 +395,50 @@ async function checkYoutubeHistory() {
       strikeCount
     };
   }
-  entries = await videoinfo.enrichEntriesWithPageInfo(entries);
 
-  const intent = await getOrExtractIntent(apiKey, instruction, writeupModel);
+  let totalCostUsd = 0;
+  const { intent, costUsd: intentCostUsd } = await getOrExtractIntent(apiKey, instruction, writeupModel);
+  totalCostUsd += intentCostUsd;
 
-  // queryYoutubeHistory() no longer caps how many videos it returns, so a
-  // single Jev call could carry an unbounded number of them and risk
-  // exceeding Jev's context window. Break into fixed-size batches, call Jev
-  // once per batch, and merge the answers back into one object keyed the
-  // same way classifyEntries() expects (video_<id> -> { noul: confidence }).
-  //
-  // Strikes are counted per batch: each ~50-video chunk gets its own match
-  // rate, and every chunk whose rate exceeds STRIKE_MATCH_THRESHOLD (0.7)
-  // adds one strike. A check over the full 1000-video history can therefore
-  // earn up to 10 strikes at once — this reflects how much of your whole
-  // recent history leaned toward the watched-for content, not just whether
-  // the latest chunk did. This total (not the old aggregate match rate) is
-  // what now drives both the strike count and the flagged/interruption
-  // decision below.
-  const batches = watch.chunk(entries, JEV_BATCH_SIZE);
-  console.log(`[Alux] checkYoutubeHistory: classifying ${entries.length} video(s) in ${batches.length} Jev call(s).`);
-  const answers = {};
-  let batchStrikes = 0;
-  for (let i = 0; i < batches.length; i++) {
-    const decisionRequest = watch.buildJevDecisionRequest(batches[i], intent);
-    const batchAnswers = await openrouter.askJevDecision(apiKey, decisionRequest);
-    Object.assign(answers, batchAnswers);
+  // Strikes are counted per calendar day, not per arbitrary batch: each
+  // day's videos get their own match rate, and every day whose rate exceeds
+  // strikeThreshold (user-chosen: 25%/50%/75%, default 50%) adds one
+  // strike — so a check over the full 30-day history can earn at most 30
+  // strikes, one per day that leaned toward the watched-for content. Within
+  // a day, entries still get sub-batched (JEV_BATCH_SIZE) purely to stay
+  // under Jev's context window — that sub-batching has no effect on
+  // strikes, only the day's combined match rate does.
+  console.log(`[Alux] checkYoutubeHistory: strike threshold ${Math.round(strikeThreshold * 100)}% match rate per day.`);
+  const allEntries = [];
+  const allAnswers = {};
+  let dayStrikes = 0;
+  console.log(`[Alux] checkYoutubeHistory: classifying ${totalVideos} video(s) across ${days.length} day(s).`);
+  for (const day of days) {
+    if (day.entries.length === 0) continue;
+    const enriched = await videoinfo.enrichEntriesWithPageInfo(day.entries);
+    allEntries.push(...enriched);
 
-    const batchMatchRate = watch.matchRate(watch.classifyEntries(batches[i], batchAnswers));
-    const earnedStrike = batchMatchRate > watch.STRIKE_MATCH_THRESHOLD;
-    if (earnedStrike) batchStrikes++;
+    const dayAnswers = {};
+    const dayBatches = watch.chunk(enriched, JEV_BATCH_SIZE);
+    for (const batch of dayBatches) {
+      const decisionRequest = watch.buildJevDecisionRequest(batch, intent);
+      const { answers: batchAnswers, usage } = await openrouter.askJevDecision(apiKey, decisionRequest);
+      Object.assign(dayAnswers, batchAnswers);
+      totalCostUsd += openrouter.estimateCostUsd(usage, openrouter.JEV_MODEL);
+    }
+    Object.assign(allAnswers, dayAnswers);
+
+    const dayMatchRate = watch.matchRate(watch.classifyEntries(enriched, dayAnswers));
+    const earnedStrike = dayMatchRate > strikeThreshold;
+    if (earnedStrike) dayStrikes++;
     console.log(
-      `[Alux] checkYoutubeHistory: batch ${i + 1}/${batches.length} done (${batches[i].length} videos, ` +
-        `match rate ${Math.round(batchMatchRate * 100)}%${earnedStrike ? ' — strike' : ''}). ` +
-        `Strikes so far this check: ${batchStrikes}.`
+      `[Alux] checkYoutubeHistory: ${day.date} — ${enriched.length} video(s), ` +
+        `match rate ${Math.round(dayMatchRate * 100)}%${earnedStrike ? ' — strike' : ''}.`
     );
   }
 
-  const classifications = watch.classifyEntries(entries, answers);
+  const entries = allEntries;
+  const classifications = watch.classifyEntries(entries, allAnswers);
   const currentMatchRate = watch.matchRate(classifications);
   const confidence = currentMatchRate;
 
@@ -408,12 +447,12 @@ async function checkYoutubeHistory() {
   // queryYoutubeHistory() has no cursor, so the same history can be
   // re-scored on the very next check; keeping any state across checks on
   // top of that would just inflate or misrepresent the count.
-  const strikeCount = batchStrikes;
+  const strikeCount = dayStrikes;
   await chrome.storage.local.set({ [STRIKE_COUNT_KEY]: strikeCount });
 
   const flagged = strikeCount > 0;
   console.log(
-    `[Alux] checkYoutubeHistory: ${strikeCount} strike(s) this check (aggregate match rate ` +
+    `[Alux] checkYoutubeHistory: ${strikeCount} strike(s) in ${watch.HISTORY_DAYS} days (aggregate match rate ` +
       `${Math.round(currentMatchRate * 100)}% across ${entries.length} video(s)) — flagged=${flagged}.`
   );
 
@@ -423,12 +462,13 @@ async function checkYoutubeHistory() {
   let text = 'Alux checked — no strikes this time; nothing in your recent YouTube history crossed the line.';
   let searchQuery = null;
   if (flagged) {
-    const raw = await openrouter.sendChatMessage(
+    const { content: raw, usage } = await openrouter.sendChatMessage(
       apiKey,
       watch.buildWriteupMessages(instruction, entries, reactionNote, intent, strikeCount),
       writeupModel,
       { responseFormat: 'json_object' }
     );
+    totalCostUsd += openrouter.estimateCostUsd(usage, writeupModel);
     ({ message: text, searchQuery } = watch.parseWriteupResponse(raw));
   }
 
@@ -441,6 +481,11 @@ async function checkYoutubeHistory() {
     classifications,
     message: { at, flagged, matchRate: currentMatchRate, confidence, instruction, reaction }
   });
+
+  // TTS (speakText(), triggered separately once the alert is actually
+  // delivered) isn't included — OpenRouter prices that per character/second,
+  // not per token, so it doesn't fit estimateCostUsd()'s token-based model.
+  console.log(`[Alux] checkYoutubeHistory: total OpenRouter cost this check: $${totalCostUsd.toFixed(6)}.`);
 
   return { ...insight, strikeCount };
 }

@@ -94,6 +94,22 @@ h2 {
   margin: 0 0 6px;
 }
 
+.intent-question {
+  display: block;
+  font-size: 11px;
+  font-style: italic;
+  color: #555;
+  background: #f5f0e6;
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin: 0 0 6px;
+}
+
+#strike-threshold {
+  width: 100%;
+  margin: 0 0 10px;
+}
+
 #instruction-input {
   width: 100%;
   box-sizing: border-box;

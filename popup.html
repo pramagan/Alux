@@ -9,7 +9,7 @@
     <header>
       <h1>Alux</h1>
       <div class="header-right">
-        <span id="strike-count" class="strike-count" title="Times you've been flagged for doomscrolling" hidden></span>
+        <span id="strike-count" class="strike-count" title="Days in the last 30 that leaned toward the watched-for content" hidden></span>
         <span id="status" class="status">checking…</span>
       </div>
     </header>
@@ -22,8 +22,11 @@
 
     <section id="watch-view" hidden>
       <h2>What should Alux watch for?</h2>
-      <p class="hint">Alux looks at your most recently watched YouTube videos and reflects on them against an instruction you give it — both when you click "Check now" and automatically every hour in the background, notifying you if something's flagged.</p>
+      <p class="hint">Alux looks at your most recently watched YouTube videos and reflects on them against an instruction you give it — both when you click "Check now" and automatically once a day in the background, notifying you if something's flagged.</p>
       <textarea id="instruction-input" rows="2" placeholder="e.g. Gently nudge me if I'm doomscrolling true-crime videos late at night"></textarea>
+      <p id="intent-question" class="intent-question" hidden></p>
+      <label class="hint" for="strike-threshold">Strike threshold: <span id="strike-threshold-value">50%</span> match rate per day</label>
+      <input type="range" id="strike-threshold" min="0" max="2" step="1" value="1" />
       <div class="btn-row">
         <button id="save-settings-btn" type="button">Save</button>
         <button id="check-history-btn" type="button">Check now</button>

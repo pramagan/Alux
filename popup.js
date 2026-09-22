@@ -5,6 +5,9 @@ const connectBtn = document.getElementById('connect-btn');
 const connectError = document.getElementById('connect-error');
 const disconnectBtn = document.getElementById('disconnect-btn');
 const instructionInput = document.getElementById('instruction-input');
+const intentQuestionEl = document.getElementById('intent-question');
+const strikeThresholdInput = document.getElementById('strike-threshold');
+const strikeThresholdValueEl = document.getElementById('strike-threshold-value');
 const saveSettingsBtn = document.getElementById('save-settings-btn');
 const checkHistoryBtn = document.getElementById('check-history-btn');
 const historyError = document.getElementById('history-error');
@@ -28,9 +31,27 @@ function renderStatus(connected) {
 
 function renderStrikeCount(strikeCount) {
   const count = strikeCount || 0;
-  strikeCountEl.textContent = `🔥 ${count} strike${count === 1 ? '' : 's'}`;
+  strikeCountEl.textContent = `🔥 ${count} strike${count === 1 ? '' : 's'} in 30 days`;
   strikeCountEl.hidden = false;
 }
+
+// Three discrete stops (25%/50%/75%) rather than a continuous slider — the
+// slider's integer step value (0/1/2) indexes into this array both ways.
+const STRIKE_THRESHOLD_STEPS = [0.25, 0.5, 0.75];
+
+function currentStrikeThreshold() {
+  return STRIKE_THRESHOLD_STEPS[Number(strikeThresholdInput.value)] ?? 0.5;
+}
+
+function renderStrikeThreshold(threshold) {
+  const stepIndex = STRIKE_THRESHOLD_STEPS.indexOf(threshold);
+  strikeThresholdInput.value = stepIndex === -1 ? 1 : stepIndex;
+  strikeThresholdValueEl.textContent = `${Math.round(currentStrikeThreshold() * 100)}%`;
+}
+
+strikeThresholdInput.addEventListener('input', () => {
+  strikeThresholdValueEl.textContent = `${Math.round(currentStrikeThreshold() * 100)}%`;
+});
 
 // Resolves once playback actually finishes (or errors out) — needed so
 // callers can tell "voice ends" apart from "voice started".
@@ -125,11 +146,22 @@ async function refreshStatus() {
   if (connected) await refreshWatchSettings();
 }
 
+function renderIntentQuestion(question) {
+  if (!question) {
+    intentQuestionEl.hidden = true;
+    return;
+  }
+  intentQuestionEl.textContent = question;
+  intentQuestionEl.hidden = false;
+}
+
 async function refreshWatchSettings() {
-  const { instruction, insight, strikeCount } = await send({ type: 'GET_WATCH_SETTINGS' });
+  const { instruction, insight, strikeCount, intentQuestion, strikeThreshold } = await send({ type: 'GET_WATCH_SETTINGS' });
   instructionInput.value = instruction;
   renderInsight(insight);
   renderStrikeCount(strikeCount);
+  renderIntentQuestion(intentQuestion);
+  renderStrikeThreshold(strikeThreshold);
 }
 
 connectBtn.addEventListener('click', async () => {
@@ -153,7 +185,12 @@ disconnectBtn.addEventListener('click', async () => {
 });
 
 saveSettingsBtn.addEventListener('click', async () => {
-  await send({ type: 'SET_WATCH_SETTINGS', instruction: instructionInput.value });
+  const result = await send({
+    type: 'SET_WATCH_SETTINGS',
+    instruction: instructionInput.value,
+    strikeThreshold: currentStrikeThreshold()
+  });
+  renderIntentQuestion(result.intentQuestion);
   const original = saveSettingsBtn.textContent;
   saveSettingsBtn.textContent = 'Saved';
   setTimeout(() => { saveSettingsBtn.textContent = original; }, 1200);
@@ -164,7 +201,11 @@ checkHistoryBtn.addEventListener('click', async () => {
   checkHistoryBtn.disabled = true;
   checkHistoryBtn.textContent = 'Watching…';
 
-  await send({ type: 'SET_WATCH_SETTINGS', instruction: instructionInput.value });
+  await send({
+    type: 'SET_WATCH_SETTINGS',
+    instruction: instructionInput.value,
+    strikeThreshold: currentStrikeThreshold()
+  });
   const result = await send({ type: 'CHECK_YOUTUBE_HISTORY' });
 
   checkHistoryBtn.disabled = false;

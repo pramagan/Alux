@@ -8,6 +8,8 @@
     "eval": "node evals/run.js",
     "eval:parse-history": "node evals/parse-history.js",
     "eval:classify": "node evals/classify-and-report.js",
-    "eval:summarize": "node evals/summarize.js"
+    "eval:summarize": "node evals/summarize.js",
+    "eval:study": "node evals/study-cost-speed.js",
+    "eval:compare-outputs": "node evals/compare-outputs.js"
   }
 }
